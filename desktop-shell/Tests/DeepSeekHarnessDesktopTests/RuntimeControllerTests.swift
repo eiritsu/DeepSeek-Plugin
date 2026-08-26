@@ -358,6 +358,13 @@ private func createSourceArchive(from source: URL, at archive: URL) throws {
   #expect(try String(contentsOf: source.appendingPathComponent(".dsh-desktop-bootstrap-version"), encoding: .utf8) == "0.1.2\n")
 }
 
+@Test func bootstrapIdentityChangesWithEveryApplicationBuild() {
+  #expect(SourceManager.bootstrapIdentity(version: "0.1.3", build: "20260826070000") == "0.1.3+20260826070000")
+  #expect(SourceManager.bootstrapIdentity(version: "0.1.3", build: "20260826070001") == "0.1.3+20260826070001")
+  #expect(SourceManager.bootstrapIdentity(version: nil, build: "1") == nil)
+  #expect(SourceManager.bootstrapIdentity(version: "0.1.3", build: nil) == nil)
+}
+
 @Test func newerApplicationReplacesAnOlderManagedSourceSnapshot() async throws {
   let temporaryRoot = FileManager.default.temporaryDirectory
     .appendingPathComponent("dsh-source-upgrade-\(UUID().uuidString)", isDirectory: true)

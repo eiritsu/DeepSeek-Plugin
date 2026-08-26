@@ -80,7 +80,7 @@ open "desktop-shell/dist/DeepSeek Harness.app"
 
 要替换已安装的旧版本，请先退出 DeepSeek Harness，再把新构建的应用复制到 `/Applications/DeepSeek Harness.app`。同级目录中以 `.previous` 结尾的路径是被替换应用的可恢复备份，不是 Harness 用户数据。
 
-运行 `scripts/package-dmg.sh` 可生成 `dist/DeepSeek-Harness-macOS.dmg`。分发构建使用 `ai.deepseek.harness.desktop`，移除开发者 checkout 路径，并且只从已跟踪文件生成内置源码快照。打包时会用插件仓库中的插件库源码与桌面桥替换快照里的上游版本，因此无需修改上游 checkout，也能让安装后的 App 使用带审查流程的安装器。App 版本变化时，已有的受管理源码快照会在安装依赖前以原子方式替换，profile、API Key、会话和日志仍保留在 Application Support。开发构建继续使用独立的 `ai.deepseek.harness.desktop.local`，因此它保存的源码根目录不会影响已安装的分发版；被忽略的 `.env` 文件和包缓存都不属于构建输入。该磁盘映像仍采用 ad-hoc 签名且未经 notarization。
+运行 `scripts/package-dmg.sh` 可生成 `dist/DeepSeek-Harness-macOS.dmg`。分发构建使用 `ai.deepseek.harness.desktop`，移除开发者 checkout 路径，并且只从已跟踪文件生成内置源码快照。打包时会用插件仓库中的插件库源码与桌面桥替换快照里的上游版本，因此无需修改上游 checkout，也能让安装后的 App 使用带审查流程的安装器。App 构建号变化时，已有的受管理源码快照会在安装依赖前以原子方式替换，profile、API Key、会话和日志仍保留在 Application Support。开发构建继续使用独立的 `ai.deepseek.harness.desktop.local`，因此它保存的源码根目录不会影响已安装的分发版；被忽略的 `.env` 文件和包缓存都不属于构建输入。该磁盘映像仍采用 ad-hoc 签名且未经 notarization。
 
 分发版会优先使用现有 `node` 与同目录 `npx`，前提是 Node.js 版本满足 `^22.19.0 || >=24.0.0`。如果没有兼容工具链，启动流程会下载官方 Node.js 24.16.0 ARM64 归档，校验固定的 SHA-256 摘要，再安装到应用支持目录中的 `tools/node`。该受管理安装不需要管理员权限，也不会替换系统 Node.js；首次安装源码依赖仍需要联网。
 

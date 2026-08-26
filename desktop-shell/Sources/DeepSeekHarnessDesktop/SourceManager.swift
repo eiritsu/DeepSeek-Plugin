@@ -24,7 +24,10 @@ final class SourceManager: @unchecked Sendable {
     supportRoot: URL? = nil,
     defaults: UserDefaults = .standard,
     bootstrapArchive: URL? = Bundle.main.url(forResource: "SourceBootstrap", withExtension: "tar.gz"),
-    bootstrapVersion: String? = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String,
+    bootstrapVersion: String? = SourceManager.bootstrapIdentity(
+      version: Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String,
+      build: Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String
+    ),
     sourceRepository: String = Bundle.main.object(forInfoDictionaryKey: "DSHSourceRepository") as? String
       ?? "https://github.com/deepseek-ai/deepseek-harness.git",
     sourceBranch: String = Bundle.main.object(forInfoDictionaryKey: "DSHSourceBranch") as? String ?? "master"
@@ -40,6 +43,11 @@ final class SourceManager: @unchecked Sendable {
     )[0].appendingPathComponent("DeepSeek Harness Desktop", isDirectory: true)
     dshHome = self.supportRoot.appendingPathComponent("data", isDirectory: true)
     probeHome = self.supportRoot.appendingPathComponent("probe-data", isDirectory: true)
+  }
+
+  static func bootstrapIdentity(version: String?, build: String?) -> String? {
+    guard let version, !version.isEmpty, let build, !build.isEmpty else { return nil }
+    return "\(version)+\(build)"
   }
 
   func resolveAndPrepare(
