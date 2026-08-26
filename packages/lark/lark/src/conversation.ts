@@ -140,8 +140,16 @@ export class LarkConversationBridge {
       this.channel.on('error', (error) => {
         if (!this.abort.signal.aborted) this.ctx.logger.warn(`Lark conversation channel error: ${String(error)}`)
       }),
+      this.ctx.on('agent/created', ({ agent }) => {
+        void this.configureDiscoveredAgent(agent).catch((error: unknown) => {
+          if (!this.abort.signal.aborted) {
+            this.ctx.logger.warn(`Lark live Agent ${agent.id} configuration failed: ${String(error)}`)
+          }
+        })
+      }),
     ]
     try {
+      await Promise.all(this.ctx.agents.list().map(async agent => { await this.configureDiscoveredAgent(agent) }))
       await this.channel.connect()
       this.connected = true
     } catch (error: unknown) {
@@ -432,6 +440,22 @@ export class LarkConversationBridge {
     }
     this.liveTimeContexts.set(sessionId, fiber)
     return agent
+  }
+
+  /** Configure a live session whose durable Lark provenance belongs to this application. */
+  private async configureDiscoveredAgent(agent: Agent): Promise<void> {
+    const belongsToApp = agent.session.events.some(event => event.type === 'user/message'
+      && event.data.source.kind === 'lark'
+      && event.data.source.appId === this.options.appId)
+    if (!belongsToApp
+      || this.handles.has(agent.id)
+      || this.liveTimeContexts.has(agent.id)
+      || this.creations.has(agent.id)) return
+    const preparation = this.configureLiveAgent(agent.id, agent).finally(() => {
+      this.creations.delete(agent.id)
+    })
+    this.creations.set(agent.id, preparation)
+    await preparation
   }
 
   /** Resolve the configured directory to one durable, user-renamable Workspace. */

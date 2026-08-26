@@ -102,6 +102,7 @@ function harness(options: {
   readonly savedFiles: ReturnType<typeof vi.fn>
 } {
   const listeners = new Set<SessionListener>()
+  const agentCreatedListeners = new Set<(payload: { agent: Agent }) => void>()
   const sessions = new Map<SessionId, FakeSession>()
   const agents = new Map<SessionId, Agent>()
   const followups: UserMessage[] = []
@@ -135,6 +136,7 @@ function harness(options: {
   const makeHandle = (sessionId: SessionId): AgentHandle => {
     const session: FakeSession = { id: sessionId, events: [] }
     const agent = {
+      id: sessionId,
       ctx: agentCtx,
       session,
       followup(message: UserMessage): void {
@@ -171,18 +173,42 @@ function harness(options: {
     }
   }
 
-  if (options.live === true) makeHandle(larkSessionId('cli_app', 'oc_chat'))
+  let liveAgent: Agent | undefined
+  if (options.live === true) {
+    const handle = makeHandle(larkSessionId('cli_app', 'oc_chat'))
+    liveAgent = handle.agent
+    const session = liveAgent.session as unknown as FakeSession
+    session.events.push({
+      type: 'user/message',
+      data: {
+        source: {
+          kind: 'lark',
+          appId: 'cli_app',
+          chatId: 'oc_chat',
+          messageId: 'om_existing',
+          senderId: 'ou_allowed',
+        },
+      },
+    })
+  }
 
   const ctx = {
     fiber: { assertActive(): void {} },
     logger: { warn: vi.fn() },
-    on(name: string, listener: SessionListener): () => void {
-      expect(name).toBe('session/event')
-      listeners.add(listener)
-      return () => { listeners.delete(listener) }
+    on(name: string, listener: SessionListener | ((payload: { agent: Agent }) => void)): () => void {
+      if (name === 'session/event') {
+        listeners.add(listener as SessionListener)
+        return () => { listeners.delete(listener as SessionListener) }
+      }
+      if (name === 'agent/created') {
+        agentCreatedListeners.add(listener as (payload: { agent: Agent }) => void)
+        return () => { agentCreatedListeners.delete(listener as (payload: { agent: Agent }) => void) }
+      }
+      throw new Error(`unexpected event listener: ${name}`)
     },
     agents: {
       get: (id: SessionId) => agents.get(id),
+      list: () => liveAgent === undefined ? [] : [liveAgent],
       create: vi.fn(async ({ sessionId, meta, setup }: {
         sessionId: SessionId
         meta?: { cwd?: string }
@@ -375,12 +401,13 @@ describe('LarkConversationBridge', () => {
     })
     await bridge.connect()
 
+    expect(runtime.setupTimeZones).toEqual(['Asia/Shanghai'])
+    expect(runtime.attached).toEqual([larkSessionId('cli_app', 'oc_chat')])
+
     await channel.emitMessage(inbound())
 
     expect(runtime.created).toEqual([])
     expect(runtime.resumed).toEqual([])
-    expect(runtime.setupTimeZones).toEqual(['Asia/Shanghai'])
-    expect(runtime.attached).toEqual([larkSessionId('cli_app', 'oc_chat')])
     expect(runtime.followups).toHaveLength(1)
     await bridge.dispose()
     expect(runtime.scopedDisposed).toHaveBeenCalledOnce()
