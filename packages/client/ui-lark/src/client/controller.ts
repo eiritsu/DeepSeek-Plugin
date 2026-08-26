@@ -3,6 +3,7 @@
 import type { ClientRemote } from '@deepseek-ai/dsh-api-remotes/client'
 import { createSnapshotStore, type SnapshotStore } from '@deepseek-ai/dsh-client-runtime/client'
 import type { LarkManagementStatus } from '@deepseek-ai/dsh-lark'
+import { openVerificationUrl } from './external-link.ts'
 
 type LarkRemote = ClientRemote['larkManagement']
 
@@ -16,7 +17,7 @@ export interface LarkManagementState {
   busy?: 'save' | 'refresh' | 'copy' | 'begin-registration' | 'complete-registration' | 'begin-auth' | 'complete-auth' | 'clear-secret'
   /** Latest user-visible outcome. */
   outcome?: 'saved' | 'copied' | 'authorized' | 'error'
-  /** Device code retained only until completion or controller disposal. */
+  /** Current-user authorization is waiting for browser consent. */
   authPending: boolean
   /** Official PersonalAgent app registration is waiting for browser approval. */
   registrationPending: boolean
@@ -30,10 +31,11 @@ export class LarkManagementController {
     authPending: false,
     registrationPending: false,
   })
-  private deviceCode: string | undefined
-
   /** Bind the generated Remote namespace. */
-  constructor(private readonly remote: LarkRemote) {}
+  constructor(
+    private readonly remote: LarkRemote,
+    private readonly openUrl: (url: string) => void = openVerificationUrl,
+  ) {}
 
   /** Refresh credentials, identity, and permissions. */
   async refresh(): Promise<void> {
@@ -44,6 +46,7 @@ export class LarkManagementController {
       this.store.update((draft) => {
         draft.status = 'ready'
         draft.value = result.value
+        draft.authPending = result.value.userAuthorizationPending
       })
     } catch (_statusFailure) {
       this.store.update((draft) => { draft.status = 'error'; draft.outcome = 'error' })
@@ -91,7 +94,7 @@ export class LarkManagementController {
     try {
       const result = await this.remote.beginManagedRegistration(brand)
       if (!result.ok) throw new Error(result.error.message)
-      window.open(result.value.verificationUrl, '_blank', 'noopener,noreferrer')
+      this.openUrl(result.value.verificationUrl)
       this.store.update((draft) => { draft.registrationPending = true })
     } catch (_registrationFailure) {
       this.store.update((draft) => { draft.outcome = 'error' })
@@ -100,13 +103,20 @@ export class LarkManagementController {
     }
   }
 
-  /** Complete official PersonalAgent registration after browser approval. */
+  /** Complete application registration, then continue into current-user OAuth. */
   async completeManagedRegistration(): Promise<void> {
     this.begin('complete-registration')
     try {
       const result = await this.remote.completeManagedRegistration()
       if (!result.ok) throw new Error(result.error.message)
-      this.store.update((draft) => { draft.registrationPending = false; draft.outcome = 'saved' })
+      const authorization = await this.remote.beginUserAuth()
+      if (!authorization.ok) throw new Error(authorization.error.message)
+      this.openUrl(authorization.value.verificationUrl)
+      this.store.update((draft) => {
+        draft.registrationPending = false
+        draft.authPending = true
+        draft.outcome = 'saved'
+      })
       await this.refreshValue()
     } catch (_registrationFailure) {
       this.store.update((draft) => { draft.outcome = 'error' })
@@ -136,8 +146,7 @@ export class LarkManagementController {
     try {
       const result = await this.remote.beginUserAuth()
       if (!result.ok) throw new Error(result.error.message)
-      this.deviceCode = result.value.deviceCode
-      window.open(result.value.verificationUrl, '_blank', 'noopener,noreferrer')
+      this.openUrl(result.value.verificationUrl)
       this.store.update((draft) => { draft.authPending = true })
     } catch (_authFailure) {
       this.store.update((draft) => { draft.outcome = 'error' })
@@ -148,12 +157,10 @@ export class LarkManagementController {
 
   /** Complete device authorization after the user confirms consent. */
   async completeUserAuth(): Promise<void> {
-    if (this.deviceCode === undefined) return
     this.begin('complete-auth')
     try {
-      const result = await this.remote.completeUserAuth(this.deviceCode)
+      const result = await this.remote.completeUserAuth()
       if (!result.ok) throw new Error(result.error.message)
-      this.deviceCode = undefined
       this.store.update((draft) => { draft.authPending = false; draft.outcome = 'authorized' })
       await this.refreshValue()
     } catch (_authFailure) {
@@ -161,11 +168,6 @@ export class LarkManagementController {
     } finally {
       this.finish()
     }
-  }
-
-  /** Forget pending browser-only authorization state. */
-  dispose(): void {
-    this.deviceCode = undefined
   }
 
   private begin(busy: NonNullable<LarkManagementState['busy']>): void {
@@ -179,6 +181,10 @@ export class LarkManagementController {
   private async refreshValue(): Promise<void> {
     const result = await this.remote.status()
     if (!result.ok) throw new Error(result.error.message)
-    this.store.update((draft) => { draft.status = 'ready'; draft.value = result.value })
+    this.store.update((draft) => {
+      draft.status = 'ready'
+      draft.value = result.value
+      draft.authPending = result.value.userAuthorizationPending
+    })
   }
 }

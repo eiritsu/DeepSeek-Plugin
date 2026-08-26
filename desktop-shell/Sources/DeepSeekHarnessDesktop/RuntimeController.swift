@@ -1,6 +1,45 @@
 import Darwin
 import Foundation
 
+struct RuntimeStartupFailure: LocalizedError, Sendable {
+  let status: Int32
+  let stderr: String
+
+  var errorDescription: String? {
+    "Harness 在就绪前退出（状态码 \(status)）。详情见桌面日志。"
+  }
+
+  var failingPluginPackage: String? {
+    let specifier = Self.firstCapture(
+      pattern: #"loader entry [^\s]+ \((@?[A-Za-z0-9._-]+(?:/[A-Za-z0-9._-]+)*)\)"#,
+      in: stderr
+    ) ?? Self.firstCapture(
+      pattern: #"profile bundle [\"'](@?[A-Za-z0-9._-]+(?:/[A-Za-z0-9._-]+)*)[\"']"#,
+      in: stderr
+    ) ?? Self.firstCapture(
+      pattern: #"node_modules/((?:@[^/\s]+/)?[^/\s]+)"#,
+      in: stderr
+    )
+    guard let specifier else { return nil }
+    let segments = specifier.split(separator: "/")
+    if specifier.hasPrefix("@"), segments.count >= 2 {
+      return "\(segments[0])/\(segments[1])"
+    }
+    return segments.first.map(String.init)
+  }
+
+  private static func firstCapture(pattern: String, in value: String) -> String? {
+    guard let expression = try? NSRegularExpression(pattern: pattern),
+          let match = expression.firstMatch(
+            in: value,
+            range: NSRange(value.startIndex..., in: value)
+          ),
+          let range = Range(match.range(at: 1), in: value)
+    else { return nil }
+    return String(value[range])
+  }
+}
+
 final class StartupState: @unchecked Sendable {
   private let lock = NSLock()
   private let ready = DispatchSemaphore(value: 0)
@@ -9,6 +48,7 @@ final class StartupState: @unchecked Sendable {
   private var readyURL: URL?
   private var startupError: Error?
   private var stdoutBuffer = ""
+  private var stderrBuffer = ""
   private var signalled = false
 
   init(
@@ -24,7 +64,12 @@ final class StartupState: @unchecked Sendable {
     let text = String(decoding: data, as: UTF8.self)
     log("runtime\(isError ? " stderr" : ""): \(text.trimmingCharacters(in: .newlines))")
     lock.lock()
-    if !isError {
+    if isError {
+      stderrBuffer.append(text)
+      if stderrBuffer.utf8.count > 128 * 1024 {
+        stderrBuffer = String(stderrBuffer.suffix(128 * 1024))
+      }
+    } else {
       stdoutBuffer.append(text)
       if readyURL == nil,
          let range = stdoutBuffer.range(of: #"dsh web: (http://127\.0\.0\.1:\d+)"#, options: .regularExpression)
@@ -43,7 +88,7 @@ final class StartupState: @unchecked Sendable {
   func terminated(status: Int32) {
     lock.lock()
     if readyURL == nil {
-      startupError = DesktopError.message("Harness 在就绪前退出（状态码 \(status)）。详情见桌面日志。")
+      startupError = RuntimeStartupFailure(status: status, stderr: stderrBuffer)
     }
     lock.unlock()
     signalOnce()
@@ -86,6 +131,7 @@ final class RuntimeController: @unchecked Sendable {
   func start(
     sourceRoot: URL,
     dshHome: URL,
+    profile: String = "web",
     progress: @escaping @Sendable (String) -> Void,
     completion: @escaping @Sendable (Result<URL, Error>) -> Void
   ) {
@@ -102,6 +148,7 @@ final class RuntimeController: @unchecked Sendable {
           executable: executable,
           sourceRoot: sourceRoot,
           dshHome: dshHome,
+          profile: profile,
           progress: progress
         )
         completion(.success(url))
@@ -116,13 +163,18 @@ final class RuntimeController: @unchecked Sendable {
     executable: URL,
     sourceRoot: URL,
     dshHome: URL,
+    profile: String,
     progress: @escaping @Sendable (String) -> Void
   ) throws -> URL {
     let child = Process()
     let stdout = Pipe()
     let stderr = Pipe()
     child.executableURL = toolchain.node
-    child.arguments = [executable.path, "web", "--no-open", "--port", "0"]
+    child.arguments = [
+      executable.path,
+      "--profile", profile,
+      "--no-open", "--port", "0",
+    ]
     child.currentDirectoryURL = sourceRoot
     child.environment = toolchain.environment(overrides: [
       "DSH_HOME": dshHome.path,

@@ -11,22 +11,31 @@ import { settingsNamespace, type SettingsScope } from '@deepseek-ai/dsh-settings
 import type { SubprocessHandle } from '@deepseek-ai/dsh-subprocess'
 import { defineTool, type PreToolDecision } from '@deepseek-ai/dsh-tools'
 import { Remote, TypertRemoteService } from '@deepseek-ai/dsh-typert-protocol'
+import {
+  commandHelpArguments,
+  helpDeclaresReadOnly,
+  isDirectReadOnlyCommand,
+  normalizeLarkCommand,
+} from './command-risk.ts'
 import { applicationScopeSets, LARK_CAPABILITIES, permissionImportTemplate, requestedUserScopes } from './permissions.ts'
 import type { LarkCapabilityId } from './permissions.ts'
+import {
+  decodePendingUserAuthorization,
+  encodePendingUserAuthorization,
+  type PendingUserAuthorization,
+} from './pending-user-auth.ts'
 
 export type { LarkCapabilityDefinition, LarkCapabilityId } from './permissions.ts'
 export { applicationScopeSets, LARK_CAPABILITIES, permissionImportTemplate, requestedUserScopes } from './permissions.ts'
 
 /** Credential reference managed by the Lark Settings page. */
 export const LARK_APP_SECRET_REF = credentialRef('LARKSUITE_CLI_APP_SECRET')
+/** Credential reference for an unfinished current-user device authorization. */
+export const LARK_PENDING_USER_AUTH_REF = credentialRef('LARKSUITE_CLI_PENDING_USER_AUTH_DEVICE_CODE')
 /** Settings namespace bound by the browser plugin. */
 export const LARK_SETTINGS_NAMESPACE = settingsNamespace('lark')
 
 const CLI_RUNNER = fileURLToPath(new URL('../vendor/larksuite-cli/scripts/run.cjs', import.meta.url))
-const READ_ONLY_COMMANDS = new Set([
-  'api GET', 'auth status', 'auth scopes', 'auth list', 'doctor', 'skills list', 'skills read',
-])
-
 /** Lark integration configuration and user-editable settings. */
 export interface Config {
   /** Self-built application id. */
@@ -103,6 +112,8 @@ export interface LarkManagementStatus {
   readonly secretConfigured: boolean
   /** Whether the current credential source accepts a replacement. */
   readonly secretWritable: boolean
+  /** Whether current-user device authorization is waiting for browser consent. */
+  readonly userAuthorizationPending: boolean
   /** Whether the official CLI produced a status response. */
   readonly cliAvailable: boolean
   /** Bot/tenant identity state. */
@@ -117,12 +128,10 @@ export interface LarkManagementStatus {
   readonly diagnostic?: string
 }
 
-/** Device authorization values returned by the official CLI. */
+/** Browser handoff for current-user device authorization. */
 export interface LarkUserAuthRequest {
   /** Opaque verification URL opened by the browser. */
   readonly verificationUrl: string
-  /** Opaque code used to complete polling after user consent. */
-  readonly deviceCode: string
 }
 
 /** Browser handoff for official managed PersonalAgent registration. */
@@ -186,14 +195,11 @@ function message(error: unknown): string {
   return error instanceof Error ? error.message : String(error)
 }
 
-function commandKey(args: readonly string[]): string {
-  return args.slice(0, 2).join(' ')
-}
-
 /** Remote service and model-facing tool backed by the official Lark CLI. */
 export default class LarkManagementGateway extends TypertRemoteService {
   static inject = ['credentials', 'settings', 'subprocess', 'tools']
   private readonly settings: SettingsScope<Config>
+  private readonly readOnlyCommandCache = new Map<string, boolean>()
   private pendingRegistration: PendingManagedRegistration | undefined
 
   /** Register the Remote service, settings namespace, tool, and write-approval gate. */
@@ -202,11 +208,11 @@ export default class LarkManagementGateway extends TypertRemoteService {
     this.settings = ctx.settings.register(LARK_SETTINGS_NAMESPACE, Config, { base: config })
     ctx.effect(() => () => { this.pendingRegistration?.handle.terminate() })
     this.registerTool(ctx)
-    ctx.on('tools/pre-execute', (exec, next): Promise<PreToolDecision> => {
+    ctx.on('tools/pre-execute', async (exec, next): Promise<PreToolDecision> => {
       if (exec.name !== 'lark_cli') return next()
       const args = record(exec.arguments)?.arguments
       if (Array.isArray(args) && args.every(value => typeof value === 'string')
-        && READ_ONLY_COMMANDS.has(commandKey(args))) return next()
+        && await this.isReadOnlyCommand(normalizeLarkCommand(args))) return next()
       return Promise.resolve({ kind: 'ask', reason: 'This Lark CLI operation may change Lark or Feishu data.' })
     })
   }
@@ -215,7 +221,10 @@ export default class LarkManagementGateway extends TypertRemoteService {
   @Remote('status')
   async status(): Promise<LarkManagementStatus> {
     const config = this.resolvedConfig()
-    const secret = await this.ctx.credentials.describe(credentialRef(config.appSecretEnv))
+    const [secret, pendingUserAuthorization] = await Promise.all([
+      this.ctx.credentials.describe(credentialRef(config.appSecretEnv)),
+      this.resolvePendingUserAuthorization(),
+    ])
     const cliConfigured = existsSync(join(config.cliConfigDir, 'config.json'))
     const configuredMode = config.credentialMode === 'none' && cliConfigured
       ? 'managed'
@@ -226,6 +235,7 @@ export default class LarkManagementGateway extends TypertRemoteService {
       credentialMode: configuredMode,
       secretConfigured: configuredMode === 'managed' ? cliConfigured : secret.configured,
       secretWritable: configuredMode !== 'managed' && secret.writable,
+      userAuthorizationPending: pendingUserAuthorization !== undefined,
       permissionTemplate: permissionImportTemplate(),
     } as const
     if (!cliConfigured) {
@@ -305,6 +315,7 @@ export default class LarkManagementGateway extends TypertRemoteService {
       throw new Error(removed.stderr || removed.stdout || 'Lark CLI configuration removal failed')
     }
     await this.ctx.credentials.unset(LARK_APP_SECRET_REF)
+    await this.ctx.credentials.unset(LARK_PENDING_USER_AUTH_REF)
     await this.settings.update({ appId: '', credentialMode: 'none' })
   }
 
@@ -354,15 +365,30 @@ export default class LarkManagementGateway extends TypertRemoteService {
     if (verificationUrl === undefined || deviceCode === undefined) {
       throw new Error('Lark CLI did not return a device authorization URL and code')
     }
-    return { verificationUrl, deviceCode }
+    await this.ctx.credentials.set(
+      LARK_PENDING_USER_AUTH_REF,
+      encodePendingUserAuthorization(deviceCode, requestedUserScopes()),
+    )
+    return { verificationUrl }
   }
 
-  /** Complete a previously started user OAuth request after the user authorizes it. */
+  /** Complete the persisted user OAuth request after the user authorizes it. */
   @Remote('completeUserAuth')
-  async completeUserAuth(deviceCode: string): Promise<void> {
-    if (deviceCode.length === 0) throw new TypeError('device code must not be empty')
-    const result = await this.runCli(['auth', 'login', '--device-code', deviceCode, '--json'])
+  async completeUserAuth(): Promise<void> {
+    const pending = await this.resolvePendingUserAuthorization()
+    if (pending === undefined) throw new Error('No Lark user authorization is pending')
+    const result = await this.runCli(['auth', 'login', '--device-code', pending.deviceCode, '--json'])
     if (result.exitCode !== 0) throw new Error(result.stderr || 'Lark user authorization failed')
+    await this.ctx.credentials.unset(LARK_PENDING_USER_AUTH_REF)
+  }
+
+  private async resolvePendingUserAuthorization(): Promise<PendingUserAuthorization | undefined> {
+    const stored = await this.ctx.credentials.resolve(LARK_PENDING_USER_AUTH_REF)
+    if (stored === undefined) return undefined
+    const pending = decodePendingUserAuthorization(stored.value, requestedUserScopes())
+    if (pending !== undefined) return pending
+    await this.ctx.credentials.unset(LARK_PENDING_USER_AUTH_REF)
+    return undefined
   }
 
   private resolvedConfig(): Required<Config> {
@@ -408,6 +434,23 @@ export default class LarkManagementGateway extends TypertRemoteService {
       return JSON.parse(result.stdout) as unknown
     } catch (error: unknown) {
       throw new Error(`Lark CLI returned invalid JSON: ${message(error)}`)
+    }
+  }
+
+  private async isReadOnlyCommand(args: readonly string[]): Promise<boolean> {
+    if (isDirectReadOnlyCommand(args)) return true
+    const helpArgs = commandHelpArguments(args)
+    if (helpArgs === undefined) return false
+    const cacheKey = helpArgs.slice(0, -1).join('\0')
+    const cached = this.readOnlyCommandCache.get(cacheKey)
+    if (cached !== undefined) return cached
+    try {
+      const result = await this.runCli(helpArgs)
+      const readOnly = result.exitCode === 0 && helpDeclaresReadOnly(result.stdout, result.stderr)
+      this.readOnlyCommandCache.set(cacheKey, readOnly)
+      return readOnly
+    } catch (_metadataInspectionFailure) {
+      return false
     }
   }
 
@@ -487,7 +530,7 @@ export default class LarkManagementGateway extends TypertRemoteService {
         arguments: {
           type: 'array',
           required: true,
-          description: 'CLI arguments after `lark-cli`, for example ["calendar", "+event-list", "--json"].',
+          description: 'CLI arguments after `lark-cli`, for example ["calendar", "+agenda", "--json"].',
           items: { type: 'string' },
         },
       },
@@ -509,10 +552,10 @@ export default class LarkManagementGateway extends TypertRemoteService {
         }],
       },
       timeoutMs: 305_000,
-      execute: (args, exec) => this.runCli(args.arguments, exec.signal),
+      execute: (args, exec) => this.runCli(normalizeLarkCommand(args.arguments), exec.signal),
       presentCall: args => ({
         card: 'terminal',
-        title: `lark-cli ${args.arguments.join(' ')}`,
+        title: `lark-cli ${normalizeLarkCommand(args.arguments).join(' ')}`,
         description: 'Official Lark/Feishu CLI',
       }),
     }))

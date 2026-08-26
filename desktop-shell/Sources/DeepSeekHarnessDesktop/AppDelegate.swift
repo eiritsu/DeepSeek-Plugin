@@ -35,6 +35,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNa
   private lazy var plugins = PluginManager(supportRoot: sources.supportRoot, dshHome: sources.dshHome)
   private var sourceRoot: URL?
   private var runtimeURL: URL?
+  private var activeRecoveryProfile: DesktopRecoveryProfile?
+  private var recoveredPluginNotice: String?
   private var terminating = false
   private var updating = false
 
@@ -180,6 +182,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNa
   }
 
   private func start(source: URL? = nil) {
+    if let recovery = activeRecoveryProfile {
+      activeRecoveryProfile = nil
+      plugins.removeRecoveryProfile(recovery) { [weak self] in
+        DispatchQueue.main.async { self?.start(source: source) }
+      }
+      return
+    }
     showStatus("正在准备 DeepSeek Harness…")
     let progress: @Sendable (String) -> Void = { text in
       let line = text.split(whereSeparator: \Character.isNewline).last.map(String.init) ?? text
@@ -200,8 +209,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNa
     else { sources.resolveAndPrepare(progress: progress, completion: ready) }
   }
 
-  private func startRuntime(source: URL, progress: @escaping @Sendable (String) -> Void) {
-    runtime.start(sourceRoot: source, dshHome: sources.dshHome, progress: progress) { [weak self] result in
+  private func startRuntime(
+    source: URL,
+    profile: String = "web",
+    allowPluginRecovery: Bool = true,
+    progress: @escaping @Sendable (String) -> Void
+  ) {
+    runtime.start(
+      sourceRoot: source,
+      dshHome: sources.dshHome,
+      profile: profile,
+      progress: progress
+    ) { [weak self] result in
       DispatchQueue.main.async {
         guard let self else { return }
         switch result {
@@ -211,7 +230,57 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNa
           self.spinner.isHidden = true
           self.webView.isHidden = false
           self.webView.load(URLRequest(url: url))
-        case let .failure(error): self.showFailure(error)
+          if let package = self.recoveredPluginNotice {
+            self.recoveredPluginNotice = nil
+            self.alert(
+              title: "已临时禁用故障插件",
+              message: "\(package) 仅在本次运行中被跳过，安装和 Web profile 均未修改。下次启动会再次尝试加载它。"
+            )
+          }
+        case let .failure(error):
+          guard allowPluginRecovery,
+                let package = (error as? RuntimeStartupFailure)?.failingPluginPackage
+          else {
+            self.showFailure(error)
+            return
+          }
+          self.recoverFromPluginFailure(
+            package: package,
+            originalError: error,
+            source: source,
+            progress: progress
+          )
+        }
+      }
+    }
+  }
+
+  private func recoverFromPluginFailure(
+    package: String,
+    originalError: Error,
+    source: URL,
+    progress: @escaping @Sendable (String) -> Void
+  ) {
+    showStatus("侧载插件 \(package) 启动失败，正在临时禁用并重试…")
+    plugins.prepareRecoveryProfile(disabling: package) { [weak self] result in
+      DispatchQueue.main.async {
+        guard let self else { return }
+        switch result {
+        case let .success(recovery?):
+          self.activeRecoveryProfile = recovery
+          self.recoveredPluginNotice = package
+          LogStore.shared.append("desktop recovery: temporarily disabled \(package) for profile \(recovery.name)")
+          self.startRuntime(
+            source: source,
+            profile: recovery.name,
+            allowPluginRecovery: false,
+            progress: progress
+          )
+        case .success(nil):
+          self.showFailure(originalError)
+        case let .failure(recoveryError):
+          LogStore.shared.append("desktop recovery failed: \(recoveryError.localizedDescription)")
+          self.showFailure(originalError)
         }
       }
     }
@@ -381,16 +450,28 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNa
     decidePolicyFor navigationAction: WKNavigationAction,
     decisionHandler: @escaping @MainActor @Sendable (WKNavigationActionPolicy) -> Void
   ) {
-    guard navigationAction.navigationType == .linkActivated,
-          let url = navigationAction.request.url,
-          url.host != "127.0.0.1",
-          url.host != "localhost"
+    guard let url = navigationAction.request.url,
+          ExternalNavigation.shouldOpen(url, navigationType: navigationAction.navigationType)
     else {
       decisionHandler(.allow)
       return
     }
     NSWorkspace.shared.open(url)
     decisionHandler(.cancel)
+  }
+
+  func webView(
+    _ webView: WKWebView,
+    createWebViewWith configuration: WKWebViewConfiguration,
+    for navigationAction: WKNavigationAction,
+    windowFeatures: WKWindowFeatures
+  ) -> WKWebView? {
+    guard navigationAction.targetFrame == nil,
+          let url = navigationAction.request.url,
+          ExternalNavigation.shouldOpen(url, navigationType: navigationAction.navigationType)
+    else { return nil }
+    NSWorkspace.shared.open(url)
+    return nil
   }
 
   func webView(
@@ -755,7 +836,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNa
   func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
     if terminating { return .terminateNow }
     terminating = true
-    runtime.stop { DispatchQueue.main.async { sender.reply(toApplicationShouldTerminate: true) } }
+    let recovery = activeRecoveryProfile
+    activeRecoveryProfile = nil
+    runtime.stop {
+      DispatchQueue.main.async {
+        guard let recovery else {
+          sender.reply(toApplicationShouldTerminate: true)
+          return
+        }
+        self.plugins.removeRecoveryProfile(recovery) {
+          DispatchQueue.main.async { sender.reply(toApplicationShouldTerminate: true) }
+        }
+      }
+    }
     return .terminateLater
   }
 }

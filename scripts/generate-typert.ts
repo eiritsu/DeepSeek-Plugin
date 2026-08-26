@@ -29,6 +29,7 @@ const managementStatus = z.object({
   credentialMode: z.union([z.literal('none'), z.literal('managed'), z.literal('self-built')]).readonly(),
   secretConfigured: z.boolean().readonly(),
   secretWritable: z.boolean().readonly(),
+  userAuthorizationPending: z.boolean().readonly(),
   cliAvailable: z.boolean().readonly(),
   bot: identityStatus,
   user: identityStatus,
@@ -43,7 +44,6 @@ const applicationInput = z.object({
 }).readonly()
 const authRequest = z.object({
   verificationUrl: z.string().readonly(),
-  deviceCode: z.string().readonly(),
 }).readonly()
 const managedRegistrationRequest = z.object({
   verificationUrl: z.string().readonly(),
@@ -98,8 +98,7 @@ const invocations = `[
   {
     id: '@deepseek-ai/dsh-lark#larkManagement/completeUserAuth',
     service: 'larkManagement', namespace: 'larkManagement', method: 'completeUserAuth',
-    invocation: { kind: 'direct' },
-    parameters: [{ name: 'deviceCode', wire: 'deviceCode', source: 'json', codec: { mode: 'strict', typeSymbol: '@deepseek-ai/dsh-lark#string', schema: z.string() } }],
+    invocation: { kind: 'direct' }, parameters: [],
     result: { mode: 'strict', typeSymbol: '@deepseek-ai/dsh-lark#void', schema: z.undefined() },
     sourceLocation: { file: 'packages/lark/lark/src/index.ts', line: 278, column: 3 },
   },
@@ -119,7 +118,7 @@ declare module '@deepseek-ai/dsh-typert-protocol' {
     beginManagedRegistration: (brand: 'feishu' | 'lark') => Promise<RemoteResult<LarkManagedRegistrationRequest>>
     completeManagedRegistration: () => Promise<RemoteResult<void>>
     beginUserAuth: () => Promise<RemoteResult<LarkUserAuthRequest>>
-    completeUserAuth: (deviceCode: string) => Promise<RemoteResult<void>>
+    completeUserAuth: () => Promise<RemoteResult<void>>
   }
   interface TypertRemoteMap {
     'larkManagement/status': TypertRemoteNamespace$6c61726b4d616e6167656d656e74['status']

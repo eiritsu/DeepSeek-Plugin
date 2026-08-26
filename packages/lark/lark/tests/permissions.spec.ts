@@ -15,6 +15,21 @@ describe('Lark permission import template', () => {
       expect(capability.user.every(scope => parsed.scopes.user.includes(scope))).toBe(true)
     }
     expect(requestedUserScopes()).toEqual(parsed.scopes.user)
+    expect(parsed.scopes.tenant).not.toContain('calendar:calendar.event:read')
+    expect(parsed.scopes.user).toContain('calendar:calendar.event:read')
+    expect(parsed.scopes.tenant).toEqual(expect.arrayContaining([
+      'im:chat:read',
+      'im:message.reactions:read',
+      'im:message:readonly',
+    ]))
+    expect(parsed.scopes.user).toEqual(expect.arrayContaining([
+      'im:chat:read',
+      'im:message.group_msg:get_as_user',
+      'im:message.p2p_msg:get_as_user',
+      'im:message.reactions:read',
+      'im:message:readonly',
+      'search:message',
+    ]))
   })
 
   it('contains permission names only and no credential fields', () => {

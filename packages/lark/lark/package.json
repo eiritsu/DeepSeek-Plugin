@@ -1,7 +1,7 @@
 {
   "name": "@deepseek-ai/dsh-lark",
   "description": "Side-loaded Lark/Feishu application management and official CLI tools",
-  "version": "0.1.1-rc.6",
+  "version": "0.1.1-rc.2",
   "type": "module",
   "main": "lib/index.js",
   "types": "lib/types/index.d.ts",
@@ -20,6 +20,8 @@
   },
   "files": [
     "lib/index.js",
+    "lib/command-risk.js",
+    "lib/pending-user-auth.js",
     "lib/invariant.js",
     "lib/permissions.js",
     "lib/ui.js",

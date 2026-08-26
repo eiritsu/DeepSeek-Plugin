@@ -53,6 +53,26 @@ const SLIDES_SCOPES = [
 
 const PERMISSION_INSPECTION_SCOPES = ['application:application:self_manage'] as const
 
+const IM_TENANT_SCOPES = [
+  'im:chat',
+  'im:chat:read',
+  'im:message',
+  'im:message.reactions:read',
+  'im:message:readonly',
+  'im:message:send_as_bot',
+] as const
+
+const IM_USER_SCOPES = [
+  'im:chat',
+  'im:chat:read',
+  'im:message',
+  'im:message.group_msg:get_as_user',
+  'im:message.p2p_msg:get_as_user',
+  'im:message.reactions:read',
+  'im:message:readonly',
+  'search:message',
+] as const
+
 /**
  * Parse the official CLI raw application-info success envelope.
  * @param value - JSON emitted by `lark-cli api GET application/v6/applications/:app_id`.
@@ -81,8 +101,13 @@ export function applicationScopeSets(value: unknown): LarkApplicationScopeSets {
 
 /** Minimum scopes for the Lark CLI capabilities exposed by this bundle. */
 export const LARK_CAPABILITIES: readonly LarkCapabilityDefinition[] = [
-  { id: 'calendar', label: '日历', tenant: ['calendar:calendar'], user: ['calendar:calendar'] },
-  { id: 'im', label: '即时通讯', tenant: ['im:chat', 'im:message', 'im:message:send_as_bot'], user: ['im:chat', 'im:message'] },
+  {
+    id: 'calendar',
+    label: '日历',
+    tenant: ['calendar:calendar'],
+    user: ['calendar:calendar', 'calendar:calendar.event:read'],
+  },
+  { id: 'im', label: '即时通讯', tenant: IM_TENANT_SCOPES, user: IM_USER_SCOPES },
   { id: 'docs', label: '云文档', tenant: ['docx:document', 'docs:document.media:upload'], user: ['docx:document', 'docs:document.media:upload'] },
   { id: 'drive', label: '云空间', tenant: ['drive:drive', 'drive:file'], user: ['drive:drive', 'drive:file'] },
   { id: 'markdown', label: 'Markdown', tenant: ['drive:file'], user: ['drive:file'] },

@@ -91,6 +91,12 @@ struct NormalizedPluginSource: Sendable {
   let pinFinding: String
 }
 
+struct DesktopRecoveryProfile: Sendable {
+  let name: String
+  let directory: URL
+  let disabledPackage: String
+}
+
 final class PluginManager: @unchecked Sendable {
   private struct CatalogCacheKey: Hashable {
     let page: Int
@@ -155,6 +161,33 @@ final class PluginManager: @unchecked Sendable {
       } catch {
         completion(.failure(error))
       }
+    }
+  }
+
+  func prepareRecoveryProfile(
+    disabling package: String,
+    completion: @escaping @Sendable (Result<DesktopRecoveryProfile?, Error>) -> Void
+  ) {
+    queue.async {
+      do {
+        completion(.success(try self.makeRecoveryProfile(disabling: package)))
+      } catch {
+        completion(.failure(error))
+      }
+    }
+  }
+
+  func removeRecoveryProfile(
+    _ profile: DesktopRecoveryProfile,
+    completion: @escaping @Sendable () -> Void = {}
+  ) {
+    queue.async {
+      do {
+        try self.removeRecoveryDirectory(profile.directory)
+      } catch {
+        LogStore.shared.append("plugin recovery cleanup failed: \(error.localizedDescription)")
+      }
+      completion()
     }
   }
 
@@ -596,6 +629,89 @@ final class PluginManager: @unchecked Sendable {
       throw DesktopError.message("插件命令失败：\n\(result.output)")
     }
     return result
+  }
+
+  private func makeRecoveryProfile(disabling package: String) throws -> DesktopRecoveryProfile? {
+    guard Self.isPackageName(package) else { return nil }
+    let profiles = dshHome.appendingPathComponent("profiles", isDirectory: true)
+    try removeStaleRecoveryDirectories(in: profiles)
+    let web = profiles.appendingPathComponent("web", isDirectory: true)
+    let manifestURL = web.appendingPathComponent("package.json")
+    let data = try Data(contentsOf: manifestURL)
+    guard var root = try JSONSerialization.jsonObject(with: data) as? [String: Any],
+          let dependencies = root["dependencies"] as? [String: String],
+          dependencies[package] != nil,
+          var dsh = root["dsh"] as? [String: Any],
+          var profile = dsh["profile"] as? [String: Any],
+          let bundles = profile["bundles"] as? [String],
+          bundles.contains(package)
+    else { return nil }
+
+    profile["bundles"] = bundles.filter { $0 != package }
+    dsh["profile"] = profile
+    root["dsh"] = dsh
+    let name = "desktop-recovery-\(UUID().uuidString.lowercased())"
+    let directory = profiles.appendingPathComponent(name, isDirectory: true)
+    try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: false)
+    do {
+      let recoveryManifest = try JSONSerialization.data(
+        withJSONObject: root,
+        options: [.prettyPrinted, .sortedKeys, .withoutEscapingSlashes]
+      ) + Data("\n".utf8)
+      try recoveryManifest.write(to: directory.appendingPathComponent("package.json"), options: .atomic)
+      for filename in ["cordis.yml", "cordis.patch.yml"] {
+        let source = web.appendingPathComponent(filename)
+        let destination = directory.appendingPathComponent(filename)
+        if FileManager.default.fileExists(atPath: source.path) {
+          try FileManager.default.copyItem(at: source, to: destination)
+        } else {
+          try Data("[]\n".utf8).write(to: destination, options: .atomic)
+        }
+      }
+      let nodeModules = web.appendingPathComponent("node_modules", isDirectory: true)
+      guard FileManager.default.fileExists(atPath: nodeModules.path) else {
+        throw DesktopError.message("Web profile 尚未安装插件依赖，无法创建临时恢复环境。")
+      }
+      try FileManager.default.createSymbolicLink(
+        at: directory.appendingPathComponent("node_modules", isDirectory: true),
+        withDestinationURL: nodeModules
+      )
+    } catch {
+      try? removeRecoveryDirectory(directory)
+      throw error
+    }
+    appendAudit(
+      action: "startup-isolation",
+      subject: package,
+      status: "success",
+      message: "侧载插件仅在本次桌面运行中临时禁用；Web profile 安装与启用状态未修改。"
+    )
+    return DesktopRecoveryProfile(name: name, directory: directory, disabledPackage: package)
+  }
+
+  private func removeStaleRecoveryDirectories(in profiles: URL) throws {
+    guard FileManager.default.fileExists(atPath: profiles.path) else { return }
+    for item in try FileManager.default.contentsOfDirectory(
+      at: profiles,
+      includingPropertiesForKeys: nil,
+      options: [.skipsHiddenFiles]
+    ) where item.lastPathComponent.hasPrefix("desktop-recovery-") {
+      try removeRecoveryDirectory(item)
+    }
+  }
+
+  private func removeRecoveryDirectory(_ directory: URL) throws {
+    let profiles = dshHome.appendingPathComponent("profiles", isDirectory: true).standardizedFileURL
+    guard directory.deletingLastPathComponent().standardizedFileURL == profiles,
+          directory.lastPathComponent.hasPrefix("desktop-recovery-")
+    else { throw DesktopError.message("拒绝清理非桌面恢复 Profile。") }
+    let modules = directory.appendingPathComponent("node_modules", isDirectory: true)
+    if (try? modules.resourceValues(forKeys: [.isSymbolicLinkKey]).isSymbolicLink) == true {
+      try FileManager.default.removeItem(at: modules)
+    }
+    if FileManager.default.fileExists(atPath: directory.path) {
+      try FileManager.default.removeItem(at: directory)
+    }
   }
 
   private func appendAudit(action: String, subject: String, status: String, message: String) {

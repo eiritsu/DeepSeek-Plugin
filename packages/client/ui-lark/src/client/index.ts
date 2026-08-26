@@ -29,7 +29,6 @@ export async function apply(ctx: ClientContext): Promise<() => Promise<void>> {
     ['slots', 'locale', 'remote', 'remote.larkManagement'],
     (surfaceCtx: ClientContext) => {
       const controller = new LarkManagementController(surfaceCtx.remote.larkManagement)
-      surfaceCtx.effect(() => () => { controller.dispose() }, 'ui-lark: controller')
       surfaceCtx.effect(() => surfaceCtx.locale.register('settings.lark', { zh, en }), 'ui-lark: dictionaries')
       const injected = (): LarkManagementSectionInjected => ({
         controller,

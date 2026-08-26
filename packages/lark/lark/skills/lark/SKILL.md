@@ -5,7 +5,9 @@ description: Use Lark/Feishu calendars, messages, documents, Drive, Base, Sheets
 
 # Lark/Feishu through DSH
 
-Use the `lark_cli` tool. Its `arguments` are the words after `lark-cli`; never include the executable itself. Prefer shortcut commands such as `calendar +event-list`, `docs +fetch`, `drive +file-list`, and `base +record-list`. Add `--json` whenever the command supports it so the result is unambiguous.
+Use the `lark_cli` tool. Its `arguments` are the words after `lark-cli`; never include the executable itself. Prefer shortcut commands such as `calendar +agenda`, `docs +fetch`, `drive +search`, and `base +record-list`. Add `--json` whenever the command supports it so the result is unambiguous.
+
+For the current user's calendar, use `calendar +agenda --json`; do not use the nonexistent `calendar +event-list` shortcut. Personal calendars require a ready user identity, not only granted application permissions.
 
 Start with a narrow read or status request. Before creating, updating, sending, deleting, granting, or otherwise changing remote data, summarize the exact target and intended effect in the tool call description; DSH will route the operation through approval. Do not work around a rejected approval.
 

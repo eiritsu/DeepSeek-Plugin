@@ -12,6 +12,17 @@ APP_ROOT="$OUTPUT_ROOT/DeepSeek Harness.app"
 ICON_SOURCE="$SHELL_ROOT/Resources/AppIcon.svg"
 ICON_WORK=$(mktemp -d)
 SNAPSHOT_WORK=""
+copy_tracked_files() {
+  ROOT=$1
+  DESTINATION=$2
+  shift 2
+  (
+    cd "$ROOT"
+    git ls-files --cached -z -- "$@" \
+      | LC_ALL=C sort -z \
+      | COPYFILE_DISABLE=1 /usr/bin/tar --null -cf - -T -
+  ) | COPYFILE_DISABLE=1 /usr/bin/tar -xf - -C "$DESTINATION"
+}
 cleanup() {
   rm -rf "$ICON_WORK"
   if [ -n "$SNAPSHOT_WORK" ]; then rm -rf "$SNAPSHOT_WORK"; fi
@@ -51,12 +62,24 @@ if [ "$DISTRIBUTION" = true ]; then
   SNAPSHOT_WORK=$(mktemp -d)
   SNAPSHOT_ROOT="$SNAPSHOT_WORK/source"
   mkdir -p "$SNAPSHOT_ROOT"
-  (
-    cd "$SOURCE_ROOT"
-    git ls-files --cached --others --exclude-standard -z \
-      | LC_ALL=C sort -z \
-      | COPYFILE_DISABLE=1 /usr/bin/tar --null -cf - -T -
-  ) | COPYFILE_DISABLE=1 /usr/bin/tar -xf - -C "$SNAPSHOT_ROOT"
+  copy_tracked_files "$SOURCE_ROOT" "$SNAPSHOT_ROOT" .
+  rm -rf \
+    "$SNAPSHOT_ROOT/packages/client/ui-plugin-library" \
+    "$SNAPSHOT_ROOT/desktop-shell"
+  copy_tracked_files "$PLUGIN_ROOT" "$SNAPSHOT_ROOT" \
+    packages/client/ui-plugin-library \
+    desktop-shell
+  copy_tracked_files "$SOURCE_ROOT" "$SNAPSHOT_ROOT" \
+    packages/client/ui-plugin-library/package.json \
+    packages/client/ui-plugin-library/tsconfig.json
+  PLUGIN_LIBRARY_VERSION=$(node -p "require('$PLUGIN_ROOT/packages/client/ui-plugin-library/package.json').version")
+  node - "$SNAPSHOT_ROOT/packages/client/ui-plugin-library/package.json" "$PLUGIN_LIBRARY_VERSION" <<'NODE'
+const fs = require('node:fs')
+const [manifestPath, version] = process.argv.slice(2)
+const manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf8'))
+manifest.version = version
+fs.writeFileSync(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`)
+NODE
   git -C "$SNAPSHOT_ROOT" init -q -b main
   git -C "$SNAPSHOT_ROOT" remote add origin https://github.com/eiritsu/DeepSeek-Harness-Desktop.git
   git -C "$SNAPSHOT_ROOT" add -A

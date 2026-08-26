@@ -44,6 +44,22 @@ import Testing
   #expect(progress.get() == ["Preparing profile\n"])
 }
 
+@Test func startupFailureIdentifiesTheRootSideloadedPackage() {
+  let state = StartupState(progress: { _ in }, log: { _ in })
+  state.consume(Data("failed to import loader entry ui-lark (@deepseek-ai/dsh-lark/ui)\n".utf8), isError: true)
+  state.terminated(status: 1)
+
+  let failure = state.outcome().1 as? RuntimeStartupFailure
+  #expect(failure?.status == 1)
+  #expect(failure?.failingPluginPackage == "@deepseek-ai/dsh-lark")
+
+  let bundleFailure = RuntimeStartupFailure(
+    status: 1,
+    stderr: "dsh: profile bundle \"plain-plugin\" declares no dsh.bundle"
+  )
+  #expect(bundleFailure.failingPluginPackage == "plain-plugin")
+}
+
 @Test func compatibleHostNodeSkipsManagedInstallation() throws {
   let temporaryRoot = FileManager.default.temporaryDirectory
     .appendingPathComponent("dsh-host-node-\(UUID().uuidString)", isDirectory: true)
@@ -147,6 +163,30 @@ private func writeExecutable(_ contents: String, to url: URL) throws {
   try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: url.path)
 }
 
+private func writePreparedSource(at root: URL, revision: String) throws {
+  for path in ["apps/cli/lib", "apps/web/dist"] {
+    try FileManager.default.createDirectory(
+      at: root.appendingPathComponent(path, isDirectory: true),
+      withIntermediateDirectories: true
+    )
+  }
+  try Data("{}\n".utf8).write(to: root.appendingPathComponent("apps/cli/package.json"))
+  try Data("export {}\n".utf8).write(to: root.appendingPathComponent("apps/cli/lib/bin.js"))
+  try Data("<!doctype html>\n".utf8).write(to: root.appendingPathComponent("apps/web/dist/index.html"))
+  try Data("\(revision)\n".utf8).write(to: root.appendingPathComponent("revision.txt"))
+}
+
+private func createSourceArchive(from source: URL, at archive: URL) throws {
+  let tar = Process()
+  tar.executableURL = URL(fileURLWithPath: "/usr/bin/tar")
+  tar.arguments = ["-czf", archive.path, "-C", source.path, "."]
+  try tar.run()
+  tar.waitUntilExit()
+  guard tar.terminationStatus == 0 else {
+    throw CocoaError(.fileWriteUnknown)
+  }
+}
+
 @Test func sessionSelectionBridgeRestoresAndMirrorsOnlyTheSelectionCell() {
   let selection = #"{"sessionId":"会话-1"}"#
   let source = SessionSelectionBridge.scriptSource(restoredSelection: selection)
@@ -231,6 +271,52 @@ private func writeExecutable(_ contents: String, to url: URL) throws {
   #expect(!plugins[1].removable)
 }
 
+@Test func recoveryProfileTemporarilySkipsOnlyTheFailingSideloadedBundle() async throws {
+  let temporaryRoot = FileManager.default.temporaryDirectory
+    .appendingPathComponent("dsh-plugin-recovery-\(UUID().uuidString)", isDirectory: true)
+  defer { try? FileManager.default.removeItem(at: temporaryRoot) }
+  let home = temporaryRoot.appendingPathComponent("home", isDirectory: true)
+  let web = home.appendingPathComponent("profiles/web", isDirectory: true)
+  try FileManager.default.createDirectory(
+    at: web.appendingPathComponent("node_modules", isDirectory: true),
+    withIntermediateDirectories: true
+  )
+  let manifest = #"{"dependencies":{"broken-plugin":"1.0.0","healthy-plugin":"1.0.0"},"dsh":{"profile":{"bundles":["@deepseek-ai/dsh-base","broken-plugin","healthy-plugin"]}}}"#
+  try Data(manifest.utf8).write(to: web.appendingPathComponent("package.json"))
+  try Data("[]\n".utf8).write(to: web.appendingPathComponent("cordis.yml"))
+  try Data("[]\n".utf8).write(to: web.appendingPathComponent("cordis.patch.yml"))
+  let manager = PluginManager(
+    supportRoot: temporaryRoot.appendingPathComponent("support", isDirectory: true),
+    dshHome: home
+  )
+
+  let recovery = try #require(try await withCheckedThrowingContinuation { continuation in
+    manager.prepareRecoveryProfile(disabling: "broken-plugin") { continuation.resume(with: $0) }
+  })
+  let recoveryData = try Data(contentsOf: recovery.directory.appendingPathComponent("package.json"))
+  let recoveryRoot = try #require(JSONSerialization.jsonObject(with: recoveryData) as? [String: Any])
+  let recoveryDsh = try #require(recoveryRoot["dsh"] as? [String: Any])
+  let recoveryProfile = try #require(recoveryDsh["profile"] as? [String: Any])
+  let recoveryBundles = try #require(recoveryProfile["bundles"] as? [String])
+  let originalData = try Data(contentsOf: web.appendingPathComponent("package.json"))
+
+  #expect(recoveryBundles == ["@deepseek-ai/dsh-base", "healthy-plugin"])
+  #expect(originalData == Data(manifest.utf8))
+  #expect(try recovery.directory.appendingPathComponent("node_modules").resourceValues(
+    forKeys: [.isSymbolicLinkKey]
+  ).isSymbolicLink == true)
+
+  await withCheckedContinuation { continuation in
+    manager.removeRecoveryProfile(recovery) { continuation.resume() }
+  }
+  #expect(!FileManager.default.fileExists(atPath: recovery.directory.path))
+
+  let builtIn = try await withCheckedThrowingContinuation { continuation in
+    manager.prepareRecoveryProfile(disabling: "@deepseek-ai/dsh-base") { continuation.resume(with: $0) }
+  }
+  #expect(builtIn == nil)
+}
+
 @Test func bundledSourceArchiveBootstrapsWithoutADeveloperPath() async throws {
   let temporaryRoot = FileManager.default.temporaryDirectory
     .appendingPathComponent("dsh-source-bootstrap-\(UUID().uuidString)", isDirectory: true)
@@ -259,7 +345,8 @@ private func writeExecutable(_ contents: String, to url: URL) throws {
   let manager = SourceManager(
     supportRoot: support,
     defaults: defaults,
-    bootstrapArchive: archive
+    bootstrapArchive: archive,
+    bootstrapVersion: "0.1.2"
   )
 
   let source = try await withCheckedThrowingContinuation { continuation in
@@ -268,6 +355,42 @@ private func writeExecutable(_ contents: String, to url: URL) throws {
 
   #expect(source == support.appendingPathComponent("source", isDirectory: true))
   #expect(FileManager.default.fileExists(atPath: source.appendingPathComponent("apps/cli/lib/bin.js").path))
+  #expect(try String(contentsOf: source.appendingPathComponent(".dsh-desktop-bootstrap-version"), encoding: .utf8) == "0.1.2\n")
+}
+
+@Test func newerApplicationReplacesAnOlderManagedSourceSnapshot() async throws {
+  let temporaryRoot = FileManager.default.temporaryDirectory
+    .appendingPathComponent("dsh-source-upgrade-\(UUID().uuidString)", isDirectory: true)
+  defer { try? FileManager.default.removeItem(at: temporaryRoot) }
+  let support = temporaryRoot.appendingPathComponent("support", isDirectory: true)
+  let installed = support.appendingPathComponent("source", isDirectory: true)
+  try writePreparedSource(at: installed, revision: "old")
+  try "0.1.1\n".write(
+    to: installed.appendingPathComponent(".dsh-desktop-bootstrap-version"),
+    atomically: true,
+    encoding: .utf8
+  )
+  let fixture = temporaryRoot.appendingPathComponent("fixture", isDirectory: true)
+  try writePreparedSource(at: fixture, revision: "new")
+  let archive = temporaryRoot.appendingPathComponent("SourceBootstrap.tar.gz")
+  try createSourceArchive(from: fixture, at: archive)
+  let suiteName = "dsh-source-upgrade-\(UUID().uuidString)"
+  let defaults = try #require(UserDefaults(suiteName: suiteName))
+  defer { defaults.removePersistentDomain(forName: suiteName) }
+  defaults.set(installed.path, forKey: "activeSourceRoot")
+  let manager = SourceManager(
+    supportRoot: support,
+    defaults: defaults,
+    bootstrapArchive: archive,
+    bootstrapVersion: "0.1.2"
+  )
+
+  let source = try await withCheckedThrowingContinuation { continuation in
+    manager.resolveAndPrepare(progress: { _ in }) { continuation.resume(with: $0) }
+  }
+
+  #expect(try String(contentsOf: source.appendingPathComponent("revision.txt"), encoding: .utf8) == "new\n")
+  #expect(try String(contentsOf: source.appendingPathComponent(".dsh-desktop-bootstrap-version"), encoding: .utf8) == "0.1.2\n")
 }
 
 @Test func desktopPluginInspectionClassifiesBundleEligibility() throws {

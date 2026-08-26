@@ -7,9 +7,12 @@ struct SourceUpdate: Sendable {
 }
 
 final class SourceManager: @unchecked Sendable {
+  private static let bootstrapVersionFile = ".dsh-desktop-bootstrap-version"
+
   private let defaults: UserDefaults
   private let queue = DispatchQueue(label: "ai.deepseek.harness.desktop.source", qos: .userInitiated)
   private let bootstrapArchive: URL?
+  private let bootstrapVersion: String?
   private let sourceRepository: String
   private let sourceBranch: String
 
@@ -21,12 +24,14 @@ final class SourceManager: @unchecked Sendable {
     supportRoot: URL? = nil,
     defaults: UserDefaults = .standard,
     bootstrapArchive: URL? = Bundle.main.url(forResource: "SourceBootstrap", withExtension: "tar.gz"),
+    bootstrapVersion: String? = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String,
     sourceRepository: String = Bundle.main.object(forInfoDictionaryKey: "DSHSourceRepository") as? String
       ?? "https://github.com/deepseek-ai/deepseek-harness.git",
     sourceBranch: String = Bundle.main.object(forInfoDictionaryKey: "DSHSourceBranch") as? String ?? "master"
   ) {
     self.defaults = defaults
     self.bootstrapArchive = bootstrapArchive
+    self.bootstrapVersion = bootstrapVersion
     self.sourceRepository = sourceRepository
     self.sourceBranch = sourceBranch
     self.supportRoot = supportRoot ?? FileManager.default.urls(
@@ -55,33 +60,30 @@ final class SourceManager: @unchecked Sendable {
 
   private func resolveSource(progress: @escaping @Sendable (String) -> Void) throws -> URL {
     let environment = ProcessInfo.processInfo.environment
-    let candidates = [
-      environment["DSH_SOURCE_DIR"],
-      defaults.string(forKey: "activeSourceRoot"),
-      Bundle.main.object(forInfoDictionaryKey: "DSHSourceRoot") as? String,
-    ].compactMap { $0 }.map { URL(fileURLWithPath: $0, isDirectory: true) }
-    if let source = candidates.first(where: isSourceRoot) { return source }
-
     let bootstrap = supportRoot.appendingPathComponent("source", isDirectory: true)
-    if isSourceRoot(bootstrap) { return bootstrap }
-    if let archive = bootstrapArchive {
-      progress("正在准备随应用提供的 DeepSeek Harness 源码…\n")
-      if FileManager.default.fileExists(atPath: bootstrap.path) {
-        try FileManager.default.removeItem(at: bootstrap)
+    if let path = environment["DSH_SOURCE_DIR"] {
+      let source = URL(fileURLWithPath: path, isDirectory: true)
+      if isSourceRoot(source) { return source }
+    }
+    if let path = defaults.string(forKey: "activeSourceRoot") {
+      let source = URL(fileURLWithPath: path, isDirectory: true)
+      if source.standardizedFileURL != bootstrap.standardizedFileURL, isSourceRoot(source) {
+        return source
       }
-      try FileManager.default.createDirectory(at: bootstrap, withIntermediateDirectories: true)
-      let unpack = try CommandRunner.run(
-        executable: URL(fileURLWithPath: "/usr/bin/tar"),
-        arguments: ["-xzf", archive.path, "-C", bootstrap.path],
-        progress: progress
-      )
-      guard unpack.status == 0, isSourceRoot(bootstrap) else {
-        try? FileManager.default.removeItem(at: bootstrap)
-        throw DesktopError.message("随应用提供的源码解压失败：\n\(unpack.output)")
+    }
+    if let path = Bundle.main.object(forInfoDictionaryKey: "DSHSourceRoot") as? String {
+      let source = URL(fileURLWithPath: path, isDirectory: true)
+      if isSourceRoot(source) { return source }
+    }
+    if let archive = bootstrapArchive {
+      if shouldInstallBootstrap(at: bootstrap) {
+        progress("正在更新随应用提供的 DeepSeek Harness 源码…\n")
+        try installBootstrap(archive, at: bootstrap, progress: progress)
       }
       defaults.set(bootstrap.path, forKey: "activeSourceRoot")
       return bootstrap
     }
+    if isSourceRoot(bootstrap) { return bootstrap }
     progress("正在首次下载 DeepSeek Harness 源码…\n")
     let result = try CommandRunner.run(
       executable: URL(fileURLWithPath: "/usr/bin/git"),
@@ -93,6 +95,44 @@ final class SourceManager: @unchecked Sendable {
     }
     defaults.set(bootstrap.path, forKey: "activeSourceRoot")
     return bootstrap
+  }
+
+  private func shouldInstallBootstrap(at bootstrap: URL) -> Bool {
+    guard isSourceRoot(bootstrap) else { return true }
+    guard let bootstrapVersion else { return false }
+    let marker = bootstrap.appendingPathComponent(Self.bootstrapVersionFile)
+    let installedVersion = try? String(contentsOf: marker, encoding: .utf8)
+      .trimmingCharacters(in: .whitespacesAndNewlines)
+    return installedVersion != bootstrapVersion
+  }
+
+  private func installBootstrap(
+    _ archive: URL,
+    at bootstrap: URL,
+    progress: @escaping @Sendable (String) -> Void
+  ) throws {
+    let stage = supportRoot.appendingPathComponent(".source-bootstrap-\(UUID().uuidString)", isDirectory: true)
+    defer { try? FileManager.default.removeItem(at: stage) }
+    try FileManager.default.createDirectory(at: stage, withIntermediateDirectories: true)
+    let unpack = try CommandRunner.run(
+      executable: URL(fileURLWithPath: "/usr/bin/tar"),
+      arguments: ["-xzf", archive.path, "-C", stage.path],
+      progress: progress
+    )
+    guard unpack.status == 0, isSourceRoot(stage) else {
+      throw DesktopError.message("随应用提供的源码解压失败：\n\(unpack.output)")
+    }
+    if let bootstrapVersion {
+      try "\(bootstrapVersion)\n".write(
+        to: stage.appendingPathComponent(Self.bootstrapVersionFile),
+        atomically: true,
+        encoding: .utf8
+      )
+    }
+    if FileManager.default.fileExists(atPath: bootstrap.path) {
+      try FileManager.default.removeItem(at: bootstrap)
+    }
+    try FileManager.default.moveItem(at: stage, to: bootstrap)
   }
 
   private func isSourceRoot(_ url: URL) -> Bool {
