@@ -25,6 +25,32 @@ export interface LarkApplicationScopeSets {
   readonly user: ReadonlySet<string>
 }
 
+const BASE_SCOPES = [
+  'base:app:copy', 'base:app:create', 'base:app:read', 'base:app:update',
+  'base:field:create', 'base:field:delete', 'base:field:read', 'base:field:update',
+  'base:record:create', 'base:record:delete', 'base:record:read', 'base:record:retrieve', 'base:record:update',
+  'base:table:create', 'base:table:delete', 'base:table:read', 'base:table:update',
+  'base:view:read', 'base:view:write_only',
+] as const
+
+const MAIL_SCOPES = [
+  'mail:user_mailbox:readonly',
+  'mail:user_mailbox.folder:read',
+  'mail:user_mailbox.message.address:read',
+  'mail:user_mailbox.message.body:read',
+  'mail:user_mailbox.message.subject:read',
+  'mail:user_mailbox.message:modify',
+  'mail:user_mailbox.message:readonly',
+] as const
+
+const SLIDES_SCOPES = [
+  'slides:presentation:create',
+  'slides:presentation:read',
+  'slides:presentation:screenshot',
+  'slides:presentation:update',
+  'slides:presentation:write_only',
+] as const
+
 /**
  * Parse the official CLI raw application-info success envelope.
  * @param value - JSON emitted by `lark-cli api GET application/v6/applications/:app_id`.
@@ -58,18 +84,18 @@ export const LARK_CAPABILITIES: readonly LarkCapabilityDefinition[] = [
   { id: 'docs', label: '云文档', tenant: ['docx:document', 'docs:document.media:upload'], user: ['docx:document', 'docs:document.media:upload'] },
   { id: 'drive', label: '云空间', tenant: ['drive:drive', 'drive:file'], user: ['drive:drive', 'drive:file'] },
   { id: 'markdown', label: 'Markdown', tenant: ['drive:file'], user: ['drive:file'] },
-  { id: 'base', label: '多维表格', tenant: ['base:app', 'base:table', 'base:field', 'base:record', 'base:view'], user: ['base:app', 'base:table', 'base:field', 'base:record', 'base:view'] },
+  { id: 'base', label: '多维表格', tenant: BASE_SCOPES, user: BASE_SCOPES },
   { id: 'sheets', label: '电子表格', tenant: ['sheets:spreadsheet'], user: ['sheets:spreadsheet'] },
-  { id: 'slides', label: '幻灯片', tenant: ['slides:slides'], user: ['slides:slides'] },
+  { id: 'slides', label: '幻灯片', tenant: SLIDES_SCOPES, user: SLIDES_SCOPES },
   { id: 'task', label: '任务', tenant: ['task:task'], user: ['task:task'] },
   { id: 'wiki', label: '知识库', tenant: ['wiki:wiki'], user: ['wiki:wiki'] },
   { id: 'contact', label: '通讯录', tenant: ['contact:user.employee:readonly'], user: ['contact:user.base:readonly'] },
-  { id: 'mail', label: '邮箱', tenant: ['mail:user_mailbox.message'], user: ['mail:user_mailbox.message'] },
+  { id: 'mail', label: '邮箱', tenant: MAIL_SCOPES, user: [...MAIL_SCOPES, 'mail:event', 'mail:user_mailbox.message:send'] },
   { id: 'meeting', label: '视频会议', tenant: ['vc:meeting', 'minutes:minutes'], user: ['vc:meeting', 'minutes:minutes'] },
   { id: 'attendance', label: '考勤打卡', tenant: ['attendance:task:readonly'], user: ['attendance:task:readonly'] },
-  { id: 'approval', label: '审批', tenant: ['approval:instance:read', 'approval:task:read'], user: ['approval:instance:read', 'approval:task:read'] },
+  { id: 'approval', label: '审批', tenant: [], user: ['approval:approval:read', 'approval:instance:read', 'approval:instance:write', 'approval:task:read', 'approval:task:write'] },
   { id: 'okr', label: 'OKR', tenant: ['okr:okr'], user: ['okr:okr'] },
-  { id: 'apps', label: '应用', tenant: ['application:application:readonly'], user: ['application:application:readonly'] },
+  { id: 'apps', label: '妙搭应用', tenant: [], user: ['spark:app:read', 'spark:app:write', 'spark:directory.user.id_convert:read'] },
 ]
 
 /** Import payload accepted by the Feishu/Lark permission batch-import dialog. */

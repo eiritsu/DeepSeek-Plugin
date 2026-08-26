@@ -10,8 +10,7 @@ describe('Lark permission import template', () => {
     expect(new Set(parsed.scopes.tenant).size).toBe(parsed.scopes.tenant.length)
     expect(new Set(parsed.scopes.user).size).toBe(parsed.scopes.user.length)
     for (const capability of LARK_CAPABILITIES) {
-      expect(capability.tenant.length).toBeGreaterThan(0)
-      expect(capability.user.length).toBeGreaterThan(0)
+      expect(capability.tenant.length + capability.user.length).toBeGreaterThan(0)
       expect(capability.tenant.every(scope => parsed.scopes.tenant.includes(scope))).toBe(true)
       expect(capability.user.every(scope => parsed.scopes.user.includes(scope))).toBe(true)
     }
@@ -31,6 +30,47 @@ describe('Lark permission import template', () => {
     expect(template).toContain('\n    "user": [\n')
     expect(template).toMatch(/\n  \}\n\}$/)
     expect(template.split('\n').length).toBeGreaterThan(10)
+  })
+
+  it('uses current Open Platform scopes under their supported identity types', () => {
+    const parsed = JSON.parse(permissionImportTemplate()) as {
+      scopes: { tenant: string[]; user: string[] }
+    }
+    const removedScopes = [
+      'application:application:readonly',
+      'base:app',
+      'base:field',
+      'base:record',
+      'base:table',
+      'base:view',
+      'mail:user_mailbox.message',
+      'slides:slides',
+    ]
+    expect(parsed.scopes.tenant).not.toEqual(expect.arrayContaining(removedScopes))
+    expect(parsed.scopes.user).not.toEqual(expect.arrayContaining(removedScopes))
+    expect(parsed.scopes.tenant).not.toEqual(expect.arrayContaining([
+      'approval:instance:read',
+      'approval:task:read',
+      'mail:event',
+      'mail:user_mailbox.message:send',
+      'spark:app:read',
+      'spark:app:write',
+    ]))
+    expect(parsed.scopes.user).toEqual(expect.arrayContaining([
+      'approval:approval:read',
+      'approval:instance:read',
+      'approval:instance:write',
+      'approval:task:read',
+      'approval:task:write',
+      'mail:user_mailbox.message:send',
+      'spark:app:read',
+      'spark:app:write',
+    ]))
+    expect(parsed.scopes.tenant).toEqual(expect.arrayContaining([
+      'base:app:read',
+      'base:record:retrieve',
+      'slides:presentation:read',
+    ]))
   })
 
   it('separates tenant and user application scopes from the official API envelope', () => {
