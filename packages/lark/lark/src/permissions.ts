@@ -80,7 +80,7 @@ export function permissionImportTemplate(): string {
       tenant: unique(LARK_CAPABILITIES.flatMap(capability => capability.tenant)),
       user: unique(LARK_CAPABILITIES.flatMap(capability => capability.user)),
     },
-  })
+  }, null, 2)
 }
 
 /** Complete user-scope set requested by the management page's OAuth flow. */

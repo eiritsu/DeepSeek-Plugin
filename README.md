@@ -36,7 +36,7 @@ PLUGIN_ROOT=$PWD
 mkdir -p "$PLUGIN_ROOT/artifacts"
 pnpm --dir packages/lark/lark pack --pack-destination "$PLUGIN_ROOT/artifacts"
 cd '../DeepSeek Harness'
-pnpm dsh plugin --profile web add "$PLUGIN_ROOT/artifacts/deepseek-ai-dsh-lark-0.1.1-rc.3.tgz"
+pnpm dsh plugin --profile web add "$PLUGIN_ROOT/artifacts/deepseek-ai-dsh-lark-0.1.1-rc.4.tgz"
 pnpm dsh --profile web
 ```
 

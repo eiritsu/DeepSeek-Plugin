@@ -25,6 +25,14 @@ describe('Lark permission import template', () => {
     expect(template).not.toContain('token')
   })
 
+  it('copies a human-readable JSON document accepted by the batch-import editor', () => {
+    const template = permissionImportTemplate()
+    expect(template).toMatch(/^\{\n  "scopes": \{\n    "tenant": \[\n/)
+    expect(template).toContain('\n    "user": [\n')
+    expect(template).toMatch(/\n  \}\n\}$/)
+    expect(template.split('\n').length).toBeGreaterThan(10)
+  })
+
   it('separates tenant and user application scopes from the official API envelope', () => {
     const scopes = applicationScopeSets({
       ok: true,
