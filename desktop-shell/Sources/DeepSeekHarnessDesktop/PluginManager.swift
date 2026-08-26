@@ -5,7 +5,59 @@ struct DesktopInstalledPlugin: Sendable {
   let name: String
   let displayName: String
   let version: String
+  let latestVersion: String?
   let removable: Bool
+}
+
+private struct DesktopPluginVersion: Comparable {
+  private enum Identifier: Equatable {
+    case number(Int)
+    case text(String)
+  }
+
+  private let core: [Int]
+  private let prerelease: [Identifier]?
+
+  init?(_ value: String) {
+    let components = value.split(separator: "-", maxSplits: 1, omittingEmptySubsequences: false)
+    let core = components[0].split(separator: ".", omittingEmptySubsequences: false)
+    guard core.count == 3,
+          core.allSatisfy({ !$0.isEmpty && $0.allSatisfy(\.isNumber) }),
+          core.compactMap({ Int($0) }).count == 3
+    else { return nil }
+    self.core = core.compactMap { Int($0) }
+    if components.count == 1 {
+      prerelease = nil
+      return
+    }
+    let parts = components[1].split(separator: ".", omittingEmptySubsequences: false)
+    guard !parts.isEmpty, parts.allSatisfy({ !$0.isEmpty }) else { return nil }
+    prerelease = parts.map { part in
+      if part.allSatisfy(\.isNumber), let number = Int(part) { return .number(number) }
+      return .text(String(part))
+    }
+  }
+
+  static func < (lhs: DesktopPluginVersion, rhs: DesktopPluginVersion) -> Bool {
+    for index in lhs.core.indices where lhs.core[index] != rhs.core[index] {
+      return lhs.core[index] < rhs.core[index]
+    }
+    switch (lhs.prerelease, rhs.prerelease) {
+    case (nil, nil): return false
+    case (nil, _): return false
+    case (_, nil): return true
+    case let (.some(left), .some(right)):
+      for index in 0..<min(left.count, right.count) where left[index] != right[index] {
+        switch (left[index], right[index]) {
+        case let (.number(a), .number(b)): return a < b
+        case (.number, .text): return true
+        case (.text, .number): return false
+        case let (.text(a), .text(b)): return a < b
+        }
+      }
+      return left.count < right.count
+    }
+  }
 }
 
 struct DesktopPluginReview: Sendable {
@@ -124,11 +176,21 @@ final class PluginManager: @unchecked Sendable {
           "@deepseek-ai/dsh-file-recognizer-office": "Deepseek-Files",
           "@deepseek-ai/dsh-model-catalog": "dsh-model-catalog",
         ]
-        var plugins = dependencies.map {
-          DesktopInstalledPlugin(
-            name: $0.key,
-            displayName: displayNames[$0.key] ?? $0.key,
-            version: $0.value,
+        var plugins = dependencies.map { dependency in
+          let latestVersion: String?
+          if let current = DesktopPluginVersion(dependency.value),
+             let latest = try? self.catalogClient.latestNPMVersion(package: dependency.key),
+             let candidate = DesktopPluginVersion(latest),
+             candidate > current {
+            latestVersion = latest
+          } else {
+            latestVersion = nil
+          }
+          return DesktopInstalledPlugin(
+            name: dependency.key,
+            displayName: displayNames[dependency.key] ?? dependency.key,
+            version: dependency.value,
+            latestVersion: latestVersion,
             removable: true
           )
         }
@@ -156,6 +218,7 @@ final class PluginManager: @unchecked Sendable {
             name: bundle.name,
             displayName: bundle.displayName,
             version: version,
+            latestVersion: nil,
             removable: false
           ))
         }
@@ -178,6 +241,52 @@ final class PluginManager: @unchecked Sendable {
         completion(.failure(error))
       }
     }
+  }
+
+  func reviewUpdate(
+    package: String,
+    completion: @escaping @Sendable (Result<DesktopPluginReview, Error>) -> Void
+  ) {
+    queue.async {
+      do {
+        guard Self.isPackageName(package) else {
+          throw DesktopError.message("插件包名格式无效。")
+        }
+        let manifest = self.dshHome.appendingPathComponent("profiles/web/package.json")
+        let data = try Data(contentsOf: manifest)
+        guard let root = try JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let dependencies = root["dependencies"] as? [String: String],
+              let currentText = dependencies[package],
+              let current = DesktopPluginVersion(currentText)
+        else {
+          throw DesktopError.message("该插件不是以 npm 精确版本安装，无法自动检查更新。")
+        }
+        let latestText = try self.catalogClient.latestNPMVersion(package: package)
+        guard let latest = DesktopPluginVersion(latestText), latest > current else {
+          throw DesktopError.message("该插件已经是最新版本。")
+        }
+        let report = try self.makeReview(source: "\(package)@\(latestText)")
+        guard report.packageName == package else {
+          throw DesktopError.message("更新来源的 package 名称与已安装插件不一致。")
+        }
+        completion(.success(report))
+      } catch {
+        self.appendAudit(
+          action: "update-review",
+          subject: package,
+          status: "failure",
+          message: error.localizedDescription
+        )
+        completion(.failure(error))
+      }
+    }
+  }
+
+  static func isNewerVersion(_ candidate: String, than current: String) -> Bool {
+    guard let candidate = DesktopPluginVersion(candidate), let current = DesktopPluginVersion(current) else {
+      return false
+    }
+    return candidate > current
   }
 
   func catalog(

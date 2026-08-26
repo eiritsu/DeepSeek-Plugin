@@ -373,6 +373,24 @@ export function PluginLibraryOverlay({ bridge, controller, t }: PluginLibraryOve
     }
   }
 
+  const reviewUpdate = async (plugin: InstalledPlugin): Promise<void> => {
+    if (plugin.latestVersion === undefined || busy !== undefined) return
+    setTab('review')
+    setBusy(`update:${plugin.name}`)
+    setError(undefined)
+    setReport(undefined)
+    try {
+      const reply = await bridge.request({ action: 'reviewUpdate', package: plugin.name })
+      setSource(reply.report.source)
+      setReport(reply.report)
+      setLogs((await bridge.request({ action: 'logs' })).records)
+    } catch (reason) {
+      setError(errorMessage(reason))
+    } finally {
+      setBusy(undefined)
+    }
+  }
+
   const remove = async (plugin: InstalledPlugin): Promise<void> => {
     if (busy !== undefined) return
     setBusy(`remove:${plugin.name}`)
@@ -447,17 +465,31 @@ export function PluginLibraryOverlay({ bridge, controller, t }: PluginLibraryOve
                         {title !== identifier ? <span>{identifier}</span> : null}
                         <span>{plugin.version}</span>
                       </div>
-                      {installedPluginRemovable(plugin) ? (
-                        <button
-                          type="button"
-                          className={css.remove}
-                          disabled={busy !== undefined}
-                          onClick={() => { void remove(plugin) }}
-                        >
-                          <IconTrashOutline16 size={14} />
-                          {busy === `remove:${plugin.name}` ? t('removing') : t('remove')}
-                        </button>
-                      ) : <span className={css.defaultInstalled}>{t('defaultInstalled')}</span>}
+                      <div className={css.pluginActions}>
+                        {plugin.latestVersion !== undefined ? (
+                          <button
+                            type="button"
+                            className={css.update}
+                            disabled={busy !== undefined}
+                            onClick={() => { void reviewUpdate(plugin) }}
+                          >
+                            {busy === `update:${plugin.name}`
+                              ? t('reviewingUpdate')
+                              : t('update', { version: plugin.latestVersion })}
+                          </button>
+                        ) : null}
+                        {installedPluginRemovable(plugin) ? (
+                          <button
+                            type="button"
+                            className={css.remove}
+                            disabled={busy !== undefined}
+                            onClick={() => { void remove(plugin) }}
+                          >
+                            <IconTrashOutline16 size={14} />
+                            {busy === `remove:${plugin.name}` ? t('removing') : t('remove')}
+                          </button>
+                        ) : <span className={css.defaultInstalled}>{t('defaultInstalled')}</span>}
+                      </div>
                     </li>
                   })}
                 </ul>

@@ -306,6 +306,7 @@
   width: 100%;
 }
 
+.update,
 .remove,
 .sourceRow button,
 .reviewHeading button {
@@ -331,6 +332,7 @@
   white-space: nowrap;
 }
 
+.update:disabled,
 .remove:disabled,
 .sourceRow button:disabled,
 .reviewHeading button:disabled {
@@ -338,9 +340,24 @@
   opacity: .55;
 }
 
-.pluginGrid[data-view='compact'] .remove {
+.pluginActions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.update {
+  background: var(--dsw-alias-button-ghost-active-fill);
+}
+
+.pluginGrid[data-view='compact'] .pluginActions {
   width: 100%;
   margin-top: auto;
+}
+
+.pluginGrid[data-view='compact'] .update,
+.pluginGrid[data-view='compact'] .remove {
+  flex: 1;
 }
 
 .defaultInstalled {
@@ -944,7 +961,7 @@
     grid-template-columns: 38px minmax(0, 1fr);
   }
 
-  .pluginGrid[data-view='detailed'] .remove,
+  .pluginGrid[data-view='detailed'] .pluginActions,
   .pluginGrid[data-view='detailed'] .defaultInstalled {
     grid-column: 1 / -1;
   }

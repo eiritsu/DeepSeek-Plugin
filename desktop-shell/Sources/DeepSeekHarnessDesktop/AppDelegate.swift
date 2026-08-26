@@ -458,12 +458,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNa
           switch result {
           case let .success(installed):
             replyHandler(["plugins": installed.map {
-              [
+              var payload: [String: Any] = [
                 "name": $0.name,
                 "displayName": $0.displayName,
                 "version": $0.version,
                 "removable": $0.removable,
               ]
+              if let latestVersion = $0.latestVersion { payload["latestVersion"] = latestVersion }
+              return payload
             }], nil)
           case let .failure(error):
             replyHandler(nil, error.localizedDescription)
@@ -569,6 +571,21 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNa
         return
       }
       plugins.review(source: source) { result in
+        DispatchQueue.main.async {
+          switch result {
+          case let .success(report):
+            replyHandler(["report": self.pluginReviewPayload(report)], nil)
+          case let .failure(error):
+            replyHandler(nil, error.localizedDescription)
+          }
+        }
+      }
+    case "reviewUpdate":
+      guard let package = request["package"] as? String else {
+        replyHandler(nil, "插件更新审查请求缺少 package。")
+        return
+      }
+      plugins.reviewUpdate(package: package) { result in
         DispatchQueue.main.async {
           switch result {
           case let .success(report):

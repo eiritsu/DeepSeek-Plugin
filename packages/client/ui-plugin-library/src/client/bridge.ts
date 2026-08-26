@@ -5,6 +5,7 @@ export interface InstalledPlugin {
   readonly name: string
   readonly displayName: string
   readonly version: string
+  readonly latestVersion?: string
   readonly removable: boolean
 }
 
@@ -91,6 +92,7 @@ export type PluginBridgeRequest =
     readonly sort: ThirdPartySort
   }
   | { readonly action: 'review'; readonly source: string }
+  | { readonly action: 'reviewUpdate'; readonly package: string }
   | { readonly action: 'selectDirectory' }
   | { readonly action: 'reviewRepository'; readonly repository: string }
   | { readonly action: 'reviewThirdParty'; readonly id: string }
@@ -114,6 +116,7 @@ export interface PluginBridgeReplies {
     readonly categories: readonly ThirdPartyCategory[]
   }
   readonly review: { readonly report: PluginReviewReport }
+  readonly reviewUpdate: { readonly report: PluginReviewReport }
   readonly selectDirectory: { readonly path?: string }
   readonly reviewRepository: { readonly report: PluginReviewReport }
   readonly reviewThirdParty: { readonly report: PluginReviewReport }

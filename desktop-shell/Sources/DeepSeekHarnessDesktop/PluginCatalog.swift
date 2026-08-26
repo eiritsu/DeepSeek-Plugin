@@ -303,22 +303,26 @@ final class PluginCatalogClient: @unchecked Sendable {
     guard Self.isNPMName(candidate) else {
       throw DesktopError.message("第三方条目的安装目标不是受支持的 npm package，未生成安装来源。")
     }
-    let encoded = candidate.addingPercentEncoding(
+    return "\(candidate)@\(try latestNPMVersion(package: candidate))"
+  }
+
+  func latestNPMVersion(package: String) throws -> String {
+    let encoded = package.addingPercentEncoding(
       withAllowedCharacters: .urlPathAllowed.subtracting(CharacterSet(charactersIn: "/"))
-    ) ?? candidate
-    let latestResponse = try fetch(requireURL("https://registry.npmjs.org/\(encoded)/latest"))
-    guard latestResponse.status == 200 else {
-      throw DesktopError.message("npm registry 返回 HTTP \(latestResponse.status)，无法固定第三方条目的版本。")
+    ) ?? package
+    let response = try fetch(requireURL("https://registry.npmjs.org/\(encoded)/latest"))
+    guard response.status == 200 else {
+      throw DesktopError.message("npm registry 返回 HTTP \(response.status)，无法检查 \(package) 的最新版本。")
     }
-    guard let latest = try? JSONDecoder().decode(NPMLatest.self, from: latestResponse.data),
+    guard let latest = try? JSONDecoder().decode(NPMLatest.self, from: response.data),
           latest.version.range(
             of: "^[0-9]+\\.[0-9]+\\.[0-9]+(?:-[0-9A-Za-z.-]+)?$",
             options: .regularExpression
           ) != nil
     else {
-      throw DesktopError.message("无法把第三方条目的 npm 来源固定到可验证的精确版本。")
+      throw DesktopError.message("npm registry 没有返回 \(package) 的有效精确版本。")
     }
-    return "\(candidate)@\(latest.version)"
+    return latest.version
   }
 
   func resolveHead(repository: String, defaultBranch: String?) throws -> String {
