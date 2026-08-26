@@ -17,6 +17,16 @@ const identityStatus = z.object({
   available: z.boolean().readonly(),
   verified: z.boolean().optional().readonly(),
 }).readonly()
+const conversationStatus = z.object({
+  status: z.union([
+    z.literal('disabled'),
+    z.literal('waiting'),
+    z.literal('connecting'),
+    z.literal('ready'),
+    z.literal('error'),
+  ]).readonly(),
+  diagnostic: z.string().optional().readonly(),
+}).readonly()
 const capabilityStatus = z.object({
   id: capabilityId.readonly(),
   label: z.string().readonly(),
@@ -33,6 +43,7 @@ const managementStatus = z.object({
   cliAvailable: z.boolean().readonly(),
   bot: identityStatus,
   user: identityStatus,
+  conversation: conversationStatus,
   capabilities: z.array(capabilityStatus).readonly(),
   permissionTemplate: z.string().readonly(),
   diagnostic: z.string().optional().readonly(),

@@ -19,6 +19,34 @@ describe('Lark generated Remote artifacts', () => {
     expect(identity(remote.TYPERT_REMOTE.descriptors)).toEqual(identity(host.TYPERT.invocations))
   })
 
+  it('retains private-chat state through the strict status schema', async () => {
+    const host = await import('../lib/typert.host.js') as {
+      TYPERT: {
+        invocations: Array<{
+          method: string
+          result: { schema: { parse(value: unknown): unknown } }
+        }>
+      }
+    }
+    const invocation = host.TYPERT.invocations.find(candidate => candidate.method === 'status')
+    expect(invocation).toBeDefined()
+    const value = {
+      appId: 'cli_test',
+      brand: 'feishu',
+      credentialMode: 'managed',
+      secretConfigured: true,
+      secretWritable: false,
+      userAuthorizationPending: false,
+      cliAvailable: true,
+      bot: { status: 'ready', available: true },
+      user: { status: 'ready', available: true },
+      conversation: { status: 'waiting', diagnostic: 'authorization required' },
+      capabilities: [],
+      permissionTemplate: '{}',
+    }
+    expect(invocation?.result.schema.parse(value)).toEqual(value)
+  })
+
   it('keeps the batch permission payload out of the browser component source', () => {
     const component = readFileSync(resolve(import.meta.dirname, '../../../client/ui-lark/src/client/LarkManagementSection.tsx'), 'utf8')
     expect(component).not.toContain('"scopes"')
