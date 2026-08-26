@@ -1,7 +1,7 @@
 {
   "name": "@deepseek-ai/dsh-client-ui-lark",
   "description": "Lark/Feishu application and permission management Settings page",
-  "version": "0.1.1-rc.5",
+  "version": "0.1.1-rc.6",
   "type": "module",
   "main": "lib/index.js",
   "types": "lib/types/index.d.ts",

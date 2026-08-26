@@ -51,6 +51,8 @@ const SLIDES_SCOPES = [
   'slides:presentation:write_only',
 ] as const
 
+const PERMISSION_INSPECTION_SCOPES = ['application:application:self_manage'] as const
+
 /**
  * Parse the official CLI raw application-info success envelope.
  * @param value - JSON emitted by `lark-cli api GET application/v6/applications/:app_id`.
@@ -103,7 +105,10 @@ export function permissionImportTemplate(): string {
   const unique = (values: readonly string[]): string[] => [...new Set(values)].sort()
   return JSON.stringify({
     scopes: {
-      tenant: unique(LARK_CAPABILITIES.flatMap(capability => capability.tenant)),
+      tenant: unique([
+        ...PERMISSION_INSPECTION_SCOPES,
+        ...LARK_CAPABILITIES.flatMap(capability => capability.tenant),
+      ]),
       user: unique(LARK_CAPABILITIES.flatMap(capability => capability.user)),
     },
   }, null, 2)

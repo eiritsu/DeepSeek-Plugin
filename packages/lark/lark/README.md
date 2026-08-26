@@ -6,6 +6,6 @@
 
 两种方式都把 OAuth token 和 CLI 配置隔离在 `$DSH_HOME/lark-cli`，不读取系统级 `~/.lark-cli`。经 SHA-256 校验的官方 v1.0.90 二进制按平台下载到 `$DSH_HOME/lark-cli-bin/v1.0.90`，不会写入插件安装目录。管理页先显示应用/Bot 连接，再显示可选的用户 OAuth；只有应用连接完成后才能授权当前用户。两个身份可以同时使用；清除连接会移除该目录管理的应用配置和 token。
 
-权限页通过官方 Open Platform 应用信息接口分别核验 tenant 与 user scope；任一层未开通时都不会显示“已获取”。复制按钮只把批量导入模板写入剪贴板，不在页面或 Remote 日志中渲染 JSON。用户 OAuth 仅请求同一模板中的 user scope，使应用后台权限与个人授权保持对应。
+权限页通过官方 Open Platform 应用信息接口分别核验 tenant 与 user scope；批量导入模板包含该检查所需的最小应用身份权限 `application:application:self_manage`，不申请可读取企业全部应用信息的高级权限 `admin:app.info:readonly`。任一层未开通时都不会显示“已获取”。复制按钮只把批量导入模板写入剪贴板，不在页面或 Remote 日志中渲染 JSON。用户 OAuth 仅请求同一模板中的 user scope，使应用后台权限与个人授权保持对应。
 
 安装本包会通过 `cordis.patch.yml` 同时加入 Host 插件和 Lark 管理页面，不会修改 DeepSeek Harness 源码或数据库格式。

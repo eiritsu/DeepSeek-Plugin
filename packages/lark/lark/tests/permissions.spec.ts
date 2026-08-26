@@ -67,10 +67,13 @@ describe('Lark permission import template', () => {
       'spark:app:write',
     ]))
     expect(parsed.scopes.tenant).toEqual(expect.arrayContaining([
+      'application:application:self_manage',
       'base:app:read',
       'base:record:retrieve',
       'slides:presentation:read',
     ]))
+    expect(parsed.scopes.tenant).not.toContain('admin:app.info:readonly')
+    expect(parsed.scopes.user).not.toContain('application:application:self_manage')
   })
 
   it('separates tenant and user application scopes from the official API envelope', () => {
