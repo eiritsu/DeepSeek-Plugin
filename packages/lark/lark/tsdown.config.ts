@@ -3,6 +3,7 @@ import { isBuiltin } from 'node:module'
 const library = {
   entry: [
     'lib/types/index.js',
+    'lib/types/conversation.js',
     'lib/types/invariant.js',
     'lib/types/permissions.js',
     'lib/types/command-risk.js',

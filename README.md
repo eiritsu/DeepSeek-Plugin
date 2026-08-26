@@ -28,7 +28,7 @@ pnpm test
 
 ## Lark/飞书侧载
 
-Lark 包同时包含 Host 插件和设置页。官方快速连接会运行 Lark CLI 的设备授权流程，由飞书开放平台创建并连接个人应用；高级连接保留已有自建应用的 App ID/App Secret。两条连接路径可分别使用 Bot 身份与用户 OAuth 身份。
+Lark 包同时包含 Host 插件和设置页。官方快速连接使用 Lark Channel SDK 的设备授权流程，由飞书开放平台创建并连接个人应用；高级连接保留已有自建应用的 App ID/App Secret。两条连接路径可分别使用 Bot 身份与用户 OAuth 身份，并可把已授权用户的飞书私聊映射到持久 DSH 会话，双向传递文本、图片和文件。
 
 ```sh
 pnpm run build

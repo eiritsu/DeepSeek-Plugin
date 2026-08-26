@@ -1,11 +1,20 @@
 import { describe, expect, it } from 'vitest'
-import { applicationScopeSets, LARK_CAPABILITIES, permissionImportTemplate, requestedUserScopes } from '../src/permissions.ts'
+import {
+  applicationScopeSets,
+  LARK_CAPABILITIES,
+  LARK_CONVERSATION_EVENTS,
+  LARK_CONVERSATION_TENANT_SCOPES,
+  permissionImportTemplate,
+  requestedTenantScopes,
+  requestedUserScopes,
+} from '../src/permissions.ts'
 
 describe('Lark permission import template', () => {
   it('covers every capability with stable unique tenant and user scopes', () => {
     const parsed = JSON.parse(permissionImportTemplate()) as {
       scopes: { tenant: string[]; user: string[] }
     }
+    expect(requestedTenantScopes()).toEqual(parsed.scopes.tenant)
     expect(LARK_CAPABILITIES).toHaveLength(17)
     expect(new Set(parsed.scopes.tenant).size).toBe(parsed.scopes.tenant.length)
     expect(new Set(parsed.scopes.user).size).toBe(parsed.scopes.user.length)
@@ -20,7 +29,10 @@ describe('Lark permission import template', () => {
     expect(parsed.scopes.tenant).toEqual(expect.arrayContaining([
       'im:chat:read',
       'im:message.reactions:read',
+      'im:message.p2p_msg:readonly',
       'im:message:readonly',
+      'im:message:send_as_bot',
+      'im:resource',
     ]))
     expect(parsed.scopes.user).toEqual(expect.arrayContaining([
       'im:chat:read',
@@ -30,6 +42,14 @@ describe('Lark permission import template', () => {
       'im:message:readonly',
       'search:message',
     ]))
+  })
+
+  it('declares the tenant scopes and event needed by the private-chat channel', () => {
+    const parsed = JSON.parse(permissionImportTemplate()) as {
+      scopes: { tenant: string[] }
+    }
+    expect(parsed.scopes.tenant).toEqual(expect.arrayContaining([...LARK_CONVERSATION_TENANT_SCOPES]))
+    expect(LARK_CONVERSATION_EVENTS).toEqual(['im.message.receive_v1'])
   })
 
   it('contains permission names only and no credential fields', () => {

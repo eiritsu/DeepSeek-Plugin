@@ -53,13 +53,23 @@ const SLIDES_SCOPES = [
 
 const PERMISSION_INSPECTION_SCOPES = ['application:application:self_manage'] as const
 
+/** Tenant scopes required by the private-chat transport. */
+export const LARK_CONVERSATION_TENANT_SCOPES = [
+  'im:message.p2p_msg:readonly',
+  'im:message:send_as_bot',
+  'im:resource',
+] as const
+
+/** Event subscriptions required by the private-chat transport. */
+export const LARK_CONVERSATION_EVENTS = ['im.message.receive_v1'] as const
+
 const IM_TENANT_SCOPES = [
   'im:chat',
   'im:chat:read',
   'im:message',
   'im:message.reactions:read',
   'im:message:readonly',
-  'im:message:send_as_bot',
+  ...LARK_CONVERSATION_TENANT_SCOPES,
 ] as const
 
 const IM_USER_SCOPES = [
@@ -127,16 +137,20 @@ export const LARK_CAPABILITIES: readonly LarkCapabilityDefinition[] = [
 
 /** Import payload accepted by the Feishu/Lark permission batch-import dialog. */
 export function permissionImportTemplate(): string {
-  const unique = (values: readonly string[]): string[] => [...new Set(values)].sort()
   return JSON.stringify({
     scopes: {
-      tenant: unique([
-        ...PERMISSION_INSPECTION_SCOPES,
-        ...LARK_CAPABILITIES.flatMap(capability => capability.tenant),
-      ]),
-      user: unique(LARK_CAPABILITIES.flatMap(capability => capability.user)),
+      tenant: requestedTenantScopes(),
+      user: requestedUserScopes(),
     },
   }, null, 2)
+}
+
+/** Complete tenant-scope set requested by managed registration and the import template. */
+export function requestedTenantScopes(): string[] {
+  return [...new Set([
+    ...PERMISSION_INSPECTION_SCOPES,
+    ...LARK_CAPABILITIES.flatMap(capability => capability.tenant),
+  ])].sort()
 }
 
 /** Complete user-scope set requested by the management page's OAuth flow. */

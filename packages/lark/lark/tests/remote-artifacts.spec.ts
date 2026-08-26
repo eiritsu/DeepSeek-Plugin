@@ -1,4 +1,4 @@
-import { readFileSync } from 'node:fs'
+import { existsSync, readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { describe, expect, it } from 'vitest'
 
@@ -29,6 +29,15 @@ describe('Lark generated Remote artifacts', () => {
     const client = readFileSync(resolve(import.meta.dirname, '../lib/client.js'), 'utf8')
     expect(client).toContain('id: "@deepseek-ai/dsh-lark/ui"')
     expect(client).not.toContain('@deepseek-ai/dsh-client-ui-lark')
+  })
+
+  it('publishes the private-chat runtime imported by the Host entry', async () => {
+    const root = resolve(import.meta.dirname, '..')
+    const manifest = JSON.parse(readFileSync(resolve(root, 'package.json'), 'utf8')) as { files: string[] }
+    expect(manifest.files).toContain('lib/conversation.js')
+    expect(existsSync(resolve(root, 'lib/conversation.js'))).toBe(true)
+    expect(readFileSync(resolve(root, 'lib/index.js'), 'utf8')).toContain('from "./conversation.js"')
+    expect((await import('../lib/index.js')).default).toBeTypeOf('function')
   })
 
   it('passes App Secret through stdin instead of environment or argv', () => {

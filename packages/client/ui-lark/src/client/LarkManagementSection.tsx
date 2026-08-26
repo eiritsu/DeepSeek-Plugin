@@ -22,6 +22,19 @@ function identityLabel(
   return item.available ? t('ready') : t('unavailable')
 }
 
+function conversationLabel(
+  status: 'disabled' | 'waiting' | 'connecting' | 'ready' | 'error',
+  t: LarkManagementSectionProps['t'],
+): string {
+  switch (status) {
+    case 'disabled': return t('conversationDisabled')
+    case 'waiting': return t('conversationWaiting')
+    case 'connecting': return t('conversationConnecting')
+    case 'ready': return t('ready')
+    case 'error': return t('conversationError')
+  }
+}
+
 /** Render application credentials, identity, and permission capability rows. */
 export function LarkManagementSection({ useLarkManagement, controller, t }: LarkManagementSectionProps): ReactNode {
   const state = useLarkManagement(value => value)
@@ -88,6 +101,15 @@ export function LarkManagementSection({ useLarkManagement, controller, t }: Lark
               <strong className={css.identityStatus} data-ok={value?.user.available === true}>{value === undefined ? t('unknown') : identityLabel(value.user, t)}</strong>
               {state.authPending ? <button type="button" disabled={state.busy !== undefined} onClick={() => { void controller.completeUserAuth() }}>{state.busy === 'complete-auth' ? t('completingAuth') : t('completeAuth')}</button> : <button type="button" disabled={state.busy !== undefined || value?.secretConfigured !== true} onClick={() => { void controller.beginUserAuth() }}>{state.busy === 'begin-auth' ? t('authorizing') : t('authorize')}</button>}
             </div>
+          </li>
+          <li>
+            <span className={css.stepNumber}>3</span>
+            <div>
+              <strong>{t('conversationIdentity')}</strong>
+              <p>{t('conversationIdentityIntro')}</p>
+              {value?.conversation.diagnostic !== undefined ? <p className={css.blockedHint}>{value.conversation.diagnostic}</p> : null}
+            </div>
+            <strong className={css.identityStatus} data-ok={value?.conversation.status === 'ready'}>{value === undefined ? t('unknown') : conversationLabel(value.conversation.status, t)}</strong>
           </li>
         </ol>
       </section>

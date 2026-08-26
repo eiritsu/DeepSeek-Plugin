@@ -5,6 +5,7 @@ import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import type { Context } from '@deepseek-ai/cordis'
 import z from '@deepseek-ai/schemastery'
+import { createLarkChannel, registerApp, type RegisterAppResult } from '@larksuite/channel'
 import { credentialRef } from '@deepseek-ai/dsh-credentials'
 import { resolveDshHome } from '@deepseek-ai/dsh-home-paths'
 import { settingsNamespace, type SettingsScope } from '@deepseek-ai/dsh-settings'
@@ -17,7 +18,15 @@ import {
   isDirectReadOnlyCommand,
   normalizeLarkCommand,
 } from './command-risk.ts'
-import { applicationScopeSets, LARK_CAPABILITIES, permissionImportTemplate, requestedUserScopes } from './permissions.ts'
+import { LarkConversationBridge } from './conversation.ts'
+import {
+  applicationScopeSets,
+  LARK_CAPABILITIES,
+  LARK_CONVERSATION_EVENTS,
+  permissionImportTemplate,
+  requestedTenantScopes,
+  requestedUserScopes,
+} from './permissions.ts'
 import type { LarkCapabilityId } from './permissions.ts'
 import {
   decodePendingUserAuthorization,
@@ -26,7 +35,7 @@ import {
 } from './pending-user-auth.ts'
 
 export type { LarkCapabilityDefinition, LarkCapabilityId } from './permissions.ts'
-export { applicationScopeSets, LARK_CAPABILITIES, permissionImportTemplate, requestedUserScopes } from './permissions.ts'
+export { applicationScopeSets, LARK_CAPABILITIES, permissionImportTemplate, requestedTenantScopes, requestedUserScopes } from './permissions.ts'
 
 /** Credential reference managed by the Lark Settings page. */
 export const LARK_APP_SECRET_REF = credentialRef('LARKSUITE_CLI_APP_SECRET')
@@ -54,6 +63,16 @@ export interface Config {
   credentialMode?: 'none' | 'managed' | 'self-built'
   /** Maximum duration of official managed-app registration. */
   registrationTimeoutMs?: number
+  /** Whether private-chat messages should drive durable Harness sessions. */
+  conversationEnabled?: boolean
+  /** Open ID allowed to use the private-chat bridge. */
+  conversationUserOpenId?: string
+  /** Maximum duration of the Channel WebSocket handshake. */
+  conversationHandshakeTimeoutMs?: number
+  /** Maximum duration to wait for one Harness turn response. */
+  conversationResponseTimeoutMs?: number
+  /** Optional workspace assigned to newly created private-chat sessions. */
+  conversationCwd?: string
 }
 
 /** Schemastery configuration for the Lark integration. */
@@ -66,6 +85,11 @@ export const Config: z<Config> = z.object({
   cliConfigDir: z.string().default(join(resolveDshHome(), 'lark-cli')),
   credentialMode: z.union(['none', 'managed', 'self-built'] as const).default('none'),
   registrationTimeoutMs: z.number().step(1).min(60_000).max(15 * 60_000).default(10 * 60_000),
+  conversationEnabled: z.boolean().default(true),
+  conversationUserOpenId: z.string().default(''),
+  conversationHandshakeTimeoutMs: z.number().step(1).min(1_000).max(300_000).default(30_000),
+  conversationResponseTimeoutMs: z.number().step(1).min(10_000).max(30 * 60_000).default(10 * 60_000),
+  conversationCwd: z.string().default(''),
 })
 
 /** Application values accepted from the management page. */
@@ -86,6 +110,14 @@ export interface LarkIdentityStatus {
   readonly available: boolean
   /** Server verification result, when verification ran. */
   readonly verified?: boolean
+}
+
+/** Runtime state of the private-chat transport. */
+export interface LarkConversationStatus {
+  /** Current connection phase. */
+  readonly status: 'disabled' | 'waiting' | 'connecting' | 'ready' | 'error'
+  /** Non-secret explanation when the transport is not ready. */
+  readonly diagnostic?: string
 }
 
 /** Permission outcome for one management-page capability row. */
@@ -120,6 +152,8 @@ export interface LarkManagementStatus {
   readonly bot: LarkIdentityStatus
   /** User OAuth identity state. */
   readonly user: LarkIdentityStatus
+  /** Private-chat transport state. */
+  readonly conversation: LarkConversationStatus
   /** Permission rows in product order. */
   readonly capabilities: readonly LarkCapabilityStatus[]
   /** Batch-import JSON copied by the page without rendering it. */
@@ -156,8 +190,10 @@ export interface LarkCliResult {
 
 interface JsonRecord { readonly [key: string]: unknown }
 interface PendingManagedRegistration {
-  readonly handle: SubprocessHandle
-  readonly verificationUrl: string
+  readonly controller: AbortController
+  readonly verificationUrl: Promise<string>
+  readonly result: Promise<RegisterAppResult>
+  readonly brand: 'feishu' | 'lark'
 }
 
 declare module '@deepseek-ai/cordis' {
@@ -197,16 +233,29 @@ function message(error: unknown): string {
 
 /** Remote service and model-facing tool backed by the official Lark CLI. */
 export default class LarkManagementGateway extends TypertRemoteService {
-  static inject = ['credentials', 'settings', 'subprocess', 'tools']
+  static inject = [
+    'agents', 'agentDefaultModel', 'attachments', 'credentials', 'sessionPersistence',
+    'settings', 'subprocess', 'tools',
+  ]
   private readonly settings: SettingsScope<Config>
   private readonly readOnlyCommandCache = new Map<string, boolean>()
   private pendingRegistration: PendingManagedRegistration | undefined
+  private conversation: LarkConversationBridge | undefined
+  private conversationState: LarkConversationStatus = { status: 'waiting', diagnostic: '正在读取对话配置。' }
+  private conversationRefreshTail: Promise<void> = Promise.resolve()
+  private disposed = false
 
   /** Register the Remote service, settings namespace, tool, and write-approval gate. */
   constructor(ctx: Context, config: Config) {
     super(ctx, 'larkManagement')
     this.settings = ctx.settings.register(LARK_SETTINGS_NAMESPACE, Config, { base: config })
-    ctx.effect(() => () => { this.pendingRegistration?.handle.terminate() })
+    ctx.effect(() => async () => {
+      this.disposed = true
+      this.pendingRegistration?.controller.abort(new Error('Lark management gateway disposed'))
+      await this.conversationRefreshTail
+      await this.conversation?.dispose()
+      this.conversation = undefined
+    })
     this.registerTool(ctx)
     ctx.on('tools/pre-execute', async (exec, next): Promise<PreToolDecision> => {
       if (exec.name !== 'lark_cli') return next()
@@ -214,6 +263,9 @@ export default class LarkManagementGateway extends TypertRemoteService {
       if (Array.isArray(args) && args.every(value => typeof value === 'string')
         && await this.isReadOnlyCommand(normalizeLarkCommand(args))) return next()
       return Promise.resolve({ kind: 'ask', reason: 'This Lark CLI operation may change Lark or Feishu data.' })
+    })
+    void this.refreshConversation().catch((error: unknown) => {
+      this.ctx.logger.warn(`Lark conversation startup failed: ${message(error)}`)
     })
   }
 
@@ -233,9 +285,10 @@ export default class LarkManagementGateway extends TypertRemoteService {
       appId: config.appId,
       brand: config.brand,
       credentialMode: configuredMode,
-      secretConfigured: configuredMode === 'managed' ? cliConfigured : secret.configured,
+      secretConfigured: secret.configured,
       secretWritable: configuredMode !== 'managed' && secret.writable,
       userAuthorizationPending: pendingUserAuthorization !== undefined,
+      conversation: this.conversationState,
       permissionTemplate: permissionImportTemplate(),
     } as const
     if (!cliConfigured) {
@@ -283,6 +336,7 @@ export default class LarkManagementGateway extends TypertRemoteService {
   async saveApplication(input: LarkApplicationInput): Promise<void> {
     const appId = input.appId.trim()
     if (appId.length === 0) throw new TypeError('Lark App ID must not be empty')
+    const current = this.resolvedConfig()
     const existing = input.appSecret === undefined
       ? await this.ctx.credentials.resolve(LARK_APP_SECRET_REF)
       : undefined
@@ -301,36 +355,71 @@ export default class LarkManagementGateway extends TypertRemoteService {
       brand: input.brand,
       appSecretEnv: String(LARK_APP_SECRET_REF),
       credentialMode: 'self-built',
+      conversationUserOpenId: current.appId === appId ? current.conversationUserOpenId : '',
     })
     if (input.appSecret !== undefined) {
       await this.ctx.credentials.set(LARK_APP_SECRET_REF, input.appSecret)
     }
+    await this.refreshConversation()
   }
 
   /** Remove the provider-managed application secret. */
   @Remote('clearSecret')
   async clearSecret(): Promise<void> {
+    this.pendingRegistration?.controller.abort(new Error('Lark application disconnected'))
+    this.pendingRegistration = undefined
     const removed = await this.runCli(['config', 'remove'])
     if (removed.exitCode !== 0 && !`${removed.stdout}\n${removed.stderr}`.includes('"subtype": "not_configured"')) {
       throw new Error(removed.stderr || removed.stdout || 'Lark CLI configuration removal failed')
     }
-    await this.ctx.credentials.unset(LARK_APP_SECRET_REF)
-    await this.ctx.credentials.unset(LARK_PENDING_USER_AUTH_REF)
-    await this.settings.update({ appId: '', credentialMode: 'none' })
+    await this.settings.update({ appId: '', credentialMode: 'none', conversationUserOpenId: '' })
+    await this.refreshConversation()
+    await Promise.all([
+      this.ctx.credentials.unset(LARK_APP_SECRET_REF),
+      this.ctx.credentials.unset(LARK_PENDING_USER_AUTH_REF),
+    ])
   }
 
   /** Start the official PersonalAgent app-registration flow without requesting a manual secret. */
   @Remote('beginManagedRegistration')
   async beginManagedRegistration(brand: 'feishu' | 'lark'): Promise<LarkManagedRegistrationRequest> {
     if (this.pendingRegistration !== undefined) {
-      return { verificationUrl: this.pendingRegistration.verificationUrl }
+      return { verificationUrl: await this.pendingRegistration.verificationUrl }
     }
     const config = this.resolvedConfig()
+    const controller = new AbortController()
     const deadline = AbortSignal.timeout(config.registrationTimeoutMs)
-    const handle = this.spawnCli(['config', 'init', '--new', '--brand', brand], deadline)
-    const verificationUrl = await this.waitForRegistrationUrl(handle)
-    this.pendingRegistration = { handle, verificationUrl }
-    return { verificationUrl }
+    let resolveUrl!: (url: string) => void
+    let rejectUrl!: (error: unknown) => void
+    const verificationUrl = new Promise<string>((resolve, reject) => {
+      resolveUrl = resolve
+      rejectUrl = reject
+    })
+    const result = registerApp({
+      domain: brand === 'lark' ? 'accounts.larksuite.com' : 'accounts.feishu.cn',
+      larkDomain: 'accounts.larksuite.com',
+      source: 'deepseek-harness',
+      signal: AbortSignal.any([controller.signal, deadline]),
+      createOnly: true,
+      appPreset: {
+        name: 'DeepSeek Harness - {user}',
+        desc: 'DeepSeek Harness 私聊 Agent',
+      },
+      addons: {
+        scopes: { tenant: requestedTenantScopes(), user: requestedUserScopes() },
+        events: { items: { tenant: [...LARK_CONVERSATION_EVENTS] } },
+      },
+      onQRCodeReady: info => { resolveUrl(info.url) },
+    })
+    void result.catch((error: unknown) => { rejectUrl(error) })
+    const pending = { controller, verificationUrl, result, brand } satisfies PendingManagedRegistration
+    this.pendingRegistration = pending
+    try {
+      return { verificationUrl: await verificationUrl }
+    } catch (error: unknown) {
+      if (this.pendingRegistration === pending) this.pendingRegistration = undefined
+      throw error
+    }
   }
 
   /** Finish a managed app registration after the user approves the official browser prompt. */
@@ -339,16 +428,35 @@ export default class LarkManagementGateway extends TypertRemoteService {
     const pending = this.pendingRegistration
     if (pending === undefined) throw new Error('No managed Lark application registration is pending')
     try {
-      const result = await this.collectCli(pending.handle, false)
-      if (result.exitCode !== 0) {
-        throw new Error(result.stderr || result.stdout || 'Lark managed application registration failed')
+      const registered = await pending.result
+      const appId = registered.client_id.trim()
+      const appSecret = registered.client_secret
+      const brand = registered.user_info?.tenant_brand ?? pending.brand
+      if (appId.length === 0 || appSecret.length === 0) {
+        throw new Error('Lark managed application registration returned incomplete credentials')
       }
-      const auth = record(await this.runJson(['auth', 'status', '--json']))
-      const appId = stringValue(auth?.appId)
-      const brand = auth?.brand === 'lark' ? 'lark' : 'feishu'
-      if (appId === undefined) throw new Error('Lark CLI registered an application without reporting its App ID')
-      await this.settings.update({ appId, brand, credentialMode: 'managed' })
-      await this.ctx.credentials.unset(LARK_APP_SECRET_REF)
+      const previous = await this.ctx.credentials.resolve(LARK_APP_SECRET_REF)
+      await this.ctx.credentials.set(LARK_APP_SECRET_REF, appSecret)
+      try {
+        const initialized = await this.runCli([
+          'config', 'init', '--app-id', appId, '--app-secret-stdin', '--brand', brand,
+        ], undefined, `${appSecret}\n`)
+        if (initialized.exitCode !== 0) {
+          throw new Error(initialized.stderr || initialized.stdout || 'Lark CLI rejected managed application credentials')
+        }
+        await this.settings.update({
+          appId,
+          brand,
+          appSecretEnv: String(LARK_APP_SECRET_REF),
+          credentialMode: 'managed',
+          conversationUserOpenId: registered.user_info?.open_id ?? '',
+        })
+      } catch (error: unknown) {
+        if (previous === undefined) await this.ctx.credentials.unset(LARK_APP_SECRET_REF)
+        else await this.ctx.credentials.set(LARK_APP_SECRET_REF, previous.value)
+        throw error
+      }
+      await this.refreshConversation()
     } finally {
       this.pendingRegistration = undefined
     }
@@ -379,7 +487,13 @@ export default class LarkManagementGateway extends TypertRemoteService {
     if (pending === undefined) throw new Error('No Lark user authorization is pending')
     const result = await this.runCli(['auth', 'login', '--device-code', pending.deviceCode, '--json'])
     if (result.exitCode !== 0) throw new Error(result.stderr || 'Lark user authorization failed')
+    const auth = record(await this.runJson(['auth', 'status', '--json']))
+    const user = record(record(auth?.identities)?.user)
+    const openId = stringValue(user?.openId)
+    if (openId === undefined) throw new Error('Lark CLI completed user authorization without reporting an Open ID')
+    await this.settings.update({ conversationUserOpenId: openId })
     await this.ctx.credentials.unset(LARK_PENDING_USER_AUTH_REF)
+    await this.refreshConversation()
   }
 
   private async resolvePendingUserAuthorization(): Promise<PendingUserAuthorization | undefined> {
@@ -402,6 +516,83 @@ export default class LarkManagementGateway extends TypertRemoteService {
       cliConfigDir: current.cliConfigDir ?? join(resolveDshHome(), 'lark-cli'),
       credentialMode: current.credentialMode ?? 'none',
       registrationTimeoutMs: current.registrationTimeoutMs ?? 10 * 60_000,
+      conversationEnabled: current.conversationEnabled ?? true,
+      conversationUserOpenId: current.conversationUserOpenId ?? '',
+      conversationHandshakeTimeoutMs: current.conversationHandshakeTimeoutMs ?? 30_000,
+      conversationResponseTimeoutMs: current.conversationResponseTimeoutMs ?? 10 * 60_000,
+      conversationCwd: current.conversationCwd ?? '',
+    }
+  }
+
+  private refreshConversation(): Promise<void> {
+    const refresh = this.conversationRefreshTail.then(async () => { await this.replaceConversation() })
+      .catch((error: unknown) => {
+        if (!this.disposed) this.conversationState = { status: 'error', diagnostic: message(error) }
+        throw error
+      })
+    this.conversationRefreshTail = refresh.catch(() => {})
+    return refresh
+  }
+
+  private async replaceConversation(): Promise<void> {
+    const previous = this.conversation
+    this.conversation = undefined
+    if (previous !== undefined) await previous.dispose()
+    if (this.disposed) return
+
+    const config = this.resolvedConfig()
+    if (!config.conversationEnabled) {
+      this.conversationState = { status: 'disabled' }
+      return
+    }
+    if (config.appId.length === 0) {
+      this.conversationState = { status: 'waiting', diagnostic: '请先连接飞书应用。' }
+      return
+    }
+    if (config.conversationUserOpenId.length === 0) {
+      this.conversationState = { status: 'waiting', diagnostic: '请完成当前用户授权，以限定可发起对话的飞书账号。' }
+      return
+    }
+    const secret = await this.ctx.credentials.resolve(credentialRef(config.appSecretEnv))
+    if (secret === undefined) {
+      this.conversationState = {
+        status: 'waiting',
+        diagnostic: config.credentialMode === 'managed'
+          ? '当前快速连接缺少 Channel 凭据，请断开后重新连接。'
+          : '请配置 App Secret。',
+      }
+      return
+    }
+
+    this.conversationState = { status: 'connecting' }
+    const bridge = new LarkConversationBridge(this.ctx, createLarkChannel({
+      appId: config.appId,
+      appSecret: secret.value,
+      domain: config.brand === 'lark' ? 'https://open.larksuite.com' : 'https://open.feishu.cn',
+      source: 'deepseek-harness',
+      handshakeTimeoutMs: config.conversationHandshakeTimeoutMs,
+      httpTimeoutMs: config.cliTimeoutMs,
+      policy: {
+        dmMode: 'allowlist',
+        dmAllowlist: [config.conversationUserOpenId],
+      },
+    }), {
+      appId: config.appId,
+      allowedSenderId: config.conversationUserOpenId,
+      responseTimeoutMs: config.conversationResponseTimeoutMs,
+      ...config.conversationCwd.trim().length === 0 ? {} : { cwd: config.conversationCwd.trim() },
+    })
+    try {
+      await bridge.connect()
+      if (this.disposed) {
+        await bridge.dispose()
+        return
+      }
+      this.conversation = bridge
+      this.conversationState = { status: 'ready' }
+    } catch (error: unknown) {
+      await bridge.dispose()
+      throw error
     }
   }
 
@@ -497,28 +688,6 @@ export default class LarkManagementGateway extends TypertRemoteService {
       timedOut: typeof timedOut === 'function' ? timedOut() : timedOut,
       stdout,
       stderr,
-    }
-  }
-
-  private async waitForRegistrationUrl(handle: SubprocessHandle): Promise<string> {
-    let output = ''
-    let offset = 0
-    while (true) {
-      const read = handle.collected.stderr?.readFrom(offset)
-      if (read !== undefined) {
-        offset = read.nextOffset
-        output = `${output}${read.text}`.slice(-256 * 1024)
-        const match = output.match(/https:\/\/(?:open\.feishu\.cn|open\.larksuite\.com)\/page\/cli\?[^\s]+/)
-        if (match !== null) return match[0]
-      }
-      const state = await Promise.race([
-        handle.done.then(() => 'done' as const),
-        new Promise<'waiting'>(resolve => { setTimeout(() => { resolve('waiting') }, 100) }),
-      ])
-      if (state === 'done') {
-        const result = await this.collectCli(handle, false)
-        throw new Error(result.stderr || result.stdout || 'Lark CLI did not return an app-registration URL')
-      }
     }
   }
 
