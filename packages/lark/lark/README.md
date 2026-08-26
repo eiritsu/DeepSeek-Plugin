@@ -8,7 +8,7 @@
 
 权限页通过官方 Open Platform 应用信息接口分别核验 tenant 与 user scope；批量导入模板包含该检查所需的最小应用身份权限 `application:application:self_manage`，不申请可读取企业全部应用信息的高级权限 `admin:app.info:readonly`。任一层未开通时都不会显示“已获取”。复制按钮只把批量导入模板写入剪贴板，不在页面或 Remote 日志中渲染 JSON。用户 OAuth 仅请求同一模板中的 user scope，使应用后台权限与个人授权保持对应。
 
-私聊 Channel 只接受完成用户授权时记录的 Open ID，群聊和其他发送者不会进入 Agent。每个 `(App ID, chat ID)` 映射到一个稳定的 DSH session；收到的消息以 `kind: lark` 及 app、chat、message、sender 标识写入持久日志，平台重投同一 message ID 时不会再次提交。插件为 `conversationCwd` 创建或复用可重命名的 DSH Workspace，并把新建或恢复的私聊 session 加入该 Workspace。新会话使用当前默认模型，已有会话从 session persistence 恢复。
+私聊 Channel 只接受完成用户授权时记录的 Open ID，群聊和其他发送者不会进入 Agent。每个 `(App ID, chat ID)` 映射到一个稳定的 DSH session；收到的消息以 `kind: lark` 及 app、chat、message、sender 标识写入持久日志，平台重投同一 message ID 时不会再次提交。插件为 `conversationCwd` 创建或复用可重命名的 DSH Workspace，并把新建、恢复或已由其他客户端恢复的私聊 session 加入该 Workspace。新会话使用当前默认模型，已有会话从 session persistence 恢复。
 
 入站文本直接进入用户消息；图片和文件由 Channel 下载后保存到 DSH attachment store，并附带可用的识别文本。assistant 回复中的文本、图片 attachment 和文件 attachment 会依次回复到原飞书消息。文件能力以结构化 attachment block 为准，不会把回复文本中的本地路径当作待上传文件。
 

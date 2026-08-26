@@ -86,6 +86,7 @@ function harness(options: {
   responseWithAttachments?: boolean
   workspaceExists?: boolean
   attachError?: Error
+  live?: boolean
 } = {}): {
   readonly ctx: Context
   readonly followups: UserMessage[]
@@ -96,6 +97,7 @@ function harness(options: {
   readonly attached: SessionId[]
   readonly workspaceCreates: string[]
   readonly disposed: ReturnType<typeof vi.fn>
+  readonly scopedDisposed: ReturnType<typeof vi.fn>
   readonly savedImages: ReturnType<typeof vi.fn>
   readonly savedFiles: ReturnType<typeof vi.fn>
 } {
@@ -110,11 +112,13 @@ function harness(options: {
   const attached: SessionId[] = []
   const workspaceCreates: string[] = []
   const disposed = vi.fn(async () => {})
+  const scopedDisposed = vi.fn(async () => {})
   const savedImages = vi.fn(async () => [IMAGE_REF])
   const savedFiles = vi.fn(async () => [FILE_REF])
   const agentCtx = {
     plugin: vi.fn(async (_plugin: unknown, config: { timeZone: string }) => {
       setupTimeZones.push(config.timeZone)
+      return { dispose: scopedDisposed }
     }),
   } as unknown as Context
   const workspace = {
@@ -131,6 +135,7 @@ function harness(options: {
   const makeHandle = (sessionId: SessionId): AgentHandle => {
     const session: FakeSession = { id: sessionId, events: [] }
     const agent = {
+      ctx: agentCtx,
       session,
       followup(message: UserMessage): void {
         followups.push(message)
@@ -165,6 +170,8 @@ function harness(options: {
       },
     }
   }
+
+  if (options.live === true) makeHandle(larkSessionId('cli_app', 'oc_chat'))
 
   const ctx = {
     fiber: { assertActive(): void {} },
@@ -227,6 +234,7 @@ function harness(options: {
     attached,
     workspaceCreates,
     disposed,
+    scopedDisposed,
     savedImages,
     savedFiles,
   }
@@ -353,5 +361,29 @@ describe('LarkConversationBridge', () => {
     expect(channel.replies).toEqual([{ text: '处理消息时发生错误，请稍后重试。' }])
     await bridge.dispose()
     expect(runtime.disposed).toHaveBeenCalledOnce()
+  })
+
+  it('configures a chat Agent that another client resumed first', async () => {
+    const runtime = harness({ live: true })
+    const channel = new FakeChannel()
+    const bridge = new LarkConversationBridge(runtime.ctx, channel as unknown as LarkChannel, {
+      appId: 'cli_app',
+      allowedSenderId: 'ou_allowed',
+      responseTimeoutMs: 1_000,
+      cwd: '/workspace',
+      timeZone: 'Asia/Shanghai',
+    })
+    await bridge.connect()
+
+    await channel.emitMessage(inbound())
+
+    expect(runtime.created).toEqual([])
+    expect(runtime.resumed).toEqual([])
+    expect(runtime.setupTimeZones).toEqual(['Asia/Shanghai'])
+    expect(runtime.attached).toEqual([larkSessionId('cli_app', 'oc_chat')])
+    expect(runtime.followups).toHaveLength(1)
+    await bridge.dispose()
+    expect(runtime.scopedDisposed).toHaveBeenCalledOnce()
+    expect(runtime.disposed).not.toHaveBeenCalled()
   })
 })

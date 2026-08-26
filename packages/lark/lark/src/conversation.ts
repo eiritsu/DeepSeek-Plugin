@@ -110,6 +110,7 @@ export class LarkConversationBridge {
   private readonly abort = new AbortController()
   private readonly creations = new Map<SessionId, Promise<Agent>>()
   private readonly handles = new Map<SessionId, AgentHandle>()
+  private readonly liveTimeContexts = new Map<SessionId, { dispose(): Promise<void> }>()
   private readonly inFlight = new Set<Promise<void>>()
   private unsubscribers: Array<() => void> = []
   private connected = false
@@ -157,6 +158,8 @@ export class LarkConversationBridge {
       await this.channel.disconnect()
     } finally {
       await Promise.allSettled([...this.inFlight])
+      await Promise.allSettled([...this.liveTimeContexts.values()].map(fiber => fiber.dispose()))
+      this.liveTimeContexts.clear()
       await Promise.allSettled([...this.handles.values()].map(handle => handle.dispose()))
       this.handles.clear()
       this.connected = false
@@ -361,12 +364,21 @@ export class LarkConversationBridge {
   private async ensureAgent(chatId: string): Promise<Agent> {
     const sessionId = larkSessionId(this.options.appId, chatId)
     const live = this.ctx.agents.get(sessionId)
-    if (live !== undefined) return live
+    if (live !== undefined && (
+      this.handles.has(sessionId)
+      || this.liveTimeContexts.has(sessionId)
+    )) return live
     let creation = this.creations.get(sessionId)
     if (creation === undefined) {
-      creation = this.createOrResumeAgent(sessionId).catch((error: unknown) => {
+      creation = (live === undefined
+        ? this.createOrResumeAgent(sessionId)
+        : this.configureLiveAgent(sessionId, live)
+      ).catch((error: unknown) => {
         const concurrent = this.ctx.agents.get(sessionId)
-        if (concurrent !== undefined) return concurrent
+        if (concurrent !== undefined && (
+          this.handles.has(sessionId)
+          || this.liveTimeContexts.has(sessionId)
+        )) return concurrent
         throw error
       }).finally(() => {
         this.creations.delete(sessionId)
@@ -406,6 +418,20 @@ export class LarkConversationBridge {
     }
     this.handles.set(sessionId, handle)
     return handle.agent
+  }
+
+  /** Add Lark-owned context and Workspace membership to an Agent resumed by another client. */
+  private async configureLiveAgent(sessionId: SessionId, agent: Agent): Promise<Agent> {
+    const workspace = await this.resolveWorkspace()
+    const fiber = await agent.ctx.plugin(timeContext, { timeZone: this.options.timeZone })
+    try {
+      await workspace.attachSession(sessionId)
+    } catch (error) {
+      await fiber.dispose()
+      throw error
+    }
+    this.liveTimeContexts.set(sessionId, fiber)
+    return agent
   }
 
   /** Resolve the configured directory to one durable, user-renamable Workspace. */
