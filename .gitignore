@@ -1,0 +1,15 @@
+node_modules/
+artifacts/
+packages/lark/lark/vendor/larksuite-cli/bin/
+lib/
+coverage/
+.DS_Store
+.env
+.env.*
+.npmrc
+.pnpm-store/
+*.key
+*.pem
+*.p12
+desktop-shell/.build/
+desktop-shell/dist/

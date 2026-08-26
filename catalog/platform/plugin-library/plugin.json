@@ -1,0 +1,12 @@
+{
+  "id": "@deepseek-ai/dsh-client-ui-plugin-library",
+  "displayName": "Plugin Library",
+  "category": "platform",
+  "version": "0.1.1-rc.3",
+  "sourcePackages": [
+    "packages/client/ui-plugin-library"
+  ],
+  "desktopBridge": "desktop-shell/Sources/DeepSeekHarnessDesktop/PluginManager.swift",
+  "artifactPattern": "deepseek-ai-dsh-client-ui-plugin-library-*.tgz",
+  "defaultInstalled": true
+}

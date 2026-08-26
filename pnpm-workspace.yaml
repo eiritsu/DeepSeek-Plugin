@@ -1,0 +1,44 @@
+packages:
+  - packages/*/*
+
+linkWorkspacePackages: true
+nodeLinker: hoisted
+
+overrides:
+  '@deepseek-ai/cordis': 'link:../DeepSeek Harness/vendor/cordis'
+  '@deepseek-ai/cordis-plugin-include': 'link:../DeepSeek Harness/vendor/include'
+  '@deepseek-ai/cordis-plugin-loader': 'link:../DeepSeek Harness/vendor/loader'
+  '@deepseek-ai/cosmokit': 'link:../DeepSeek Harness/vendor/cosmokit'
+  '@deepseek-ai/schemastery': 'link:../DeepSeek Harness/vendor/schemastery'
+  '@deepseek-ai/dsh-api-remotes': 'link:../DeepSeek Harness/packages/api/remotes'
+  '@deepseek-ai/dsh-attachment': 'link:../DeepSeek Harness/packages/attachment/attachment'
+  '@deepseek-ai/dsh-client-connection': 'link:../DeepSeek Harness/packages/client/connection'
+  '@deepseek-ai/dsh-client-locale': 'link:../DeepSeek Harness/packages/client/locale'
+  '@deepseek-ai/dsh-client-runtime': 'link:../DeepSeek Harness/packages/client/runtime'
+  '@deepseek-ai/dsh-client-ui-layout': 'link:../DeepSeek Harness/packages/client/ui-layout'
+  '@deepseek-ai/dsh-client-ui-primitives': 'link:../DeepSeek Harness/packages/client/ui-primitives'
+  '@deepseek-ai/dsh-client-ui-settings': 'link:../DeepSeek Harness/packages/client/ui-settings'
+  '@deepseek-ai/dsh-client-ui-sidebar': 'link:../DeepSeek Harness/packages/client/ui-sidebar'
+  '@deepseek-ai/dsh-client-ui-slots': 'link:../DeepSeek Harness/packages/client/ui-slots'
+  '@deepseek-ai/dsh-credentials': 'link:../DeepSeek Harness/packages/credentials/credentials'
+  '@deepseek-ai/dsh-invariants': 'link:../DeepSeek Harness/packages/runtime-diagnostics/invariants'
+  '@deepseek-ai/dsh-home-paths': 'link:../DeepSeek Harness/packages/util/home-paths'
+  '@deepseek-ai/dsh-llm': 'link:../DeepSeek Harness/packages/llm/llm'
+  '@deepseek-ai/dsh-llm-pi-ai': 'link:../DeepSeek Harness/packages/llm/llm-pi-ai'
+  '@deepseek-ai/dsh-settings': 'link:../DeepSeek Harness/packages/settings/settings'
+  '@deepseek-ai/dsh-storage': 'link:../DeepSeek Harness/packages/storage/storage'
+  '@deepseek-ai/dsh-storage-domain': 'link:../DeepSeek Harness/packages/storage/storage-domain'
+  '@deepseek-ai/dsh-storage-json': 'link:../DeepSeek Harness/packages/storage/storage-json'
+  '@deepseek-ai/dsh-subprocess': 'link:../DeepSeek Harness/packages/subprocess/subprocess'
+  '@deepseek-ai/dsh-tools': 'link:../DeepSeek Harness/packages/core/tools'
+  '@deepseek-ai/dsh-typert-protocol': 'link:../DeepSeek Harness/packages/typert/protocol'
+
+allowBuilds:
+  esbuild: true
+  '@google/genai': false
+  protobufjs: false
+  tesseract.js: false
+  '@larksuite/cli': false
+
+minimumReleaseAgeExclude:
+  - '@larksuite/cli@1.0.90'

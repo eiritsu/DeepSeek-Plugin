@@ -1,0 +1,12 @@
+{
+  "id": "@deepseek-ai/dsh-lark",
+  "displayName": "Lark / 飞书",
+  "category": "collaboration",
+  "version": "0.1.1-rc.3",
+  "sourcePackages": [
+    "packages/lark/lark",
+    "packages/client/ui-lark"
+  ],
+  "artifactPattern": "deepseek-ai-dsh-lark-*.tgz",
+  "defaultInstalled": false
+}

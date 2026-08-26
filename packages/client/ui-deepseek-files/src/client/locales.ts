@@ -1,0 +1,63 @@
+/** Deepseek-Files settings copy. */
+
+export const zh = {
+  nav: 'Deepseek-Files',
+  title: 'Deepseek-Files',
+  intro: '配置文档 OCR、音频转写与视频理解服务。普通文本、Markdown、Office 与可提取 PDF 仍在本机识别。',
+  loading: '正在读取识别设置…',
+  unavailable: '当前运行时没有加载 Deepseek-Files 设置。',
+  readOnly: '当前设置来源只读。',
+  ocrTitle: 'OCR',
+  ocrDescription: '所选路由原生支持图片或 PDF 时直接发送；否则使用 OCR。服务应兼容 Chat Completions 的 file 或 image_url 内容。',
+  audioTitle: '音频转写',
+  audioDescription: '所选路由原生支持音频时直接发送；否则 Endpoint 应接受 OpenAI-compatible Audio Transcriptions multipart 请求。',
+  videoTitle: '视频理解',
+  videoDescription: '所选路由原生支持视频时直接发送；否则 Endpoint 应接受 OpenAI-compatible Chat Completions video_url 内容。',
+  model: 'Model ID',
+  modelPlaceholder: '输入模型 ID',
+  endpoint: 'API Base URL / Endpoint',
+  endpointPlaceholder: 'https://provider.example/v1',
+  apiKey: 'API Key',
+  apiKeyPlaceholder: '留空以保留已保存的密钥',
+  keyConfigured: 'API key 已配置',
+  keyMissing: 'API key 未配置；本地或免认证 endpoint 可留空',
+  keyReadOnly: 'API key 来自只读凭据源',
+  removeKey: '移除已保存的 API key',
+  save: '保存',
+  saving: '正在保存…',
+  saved: '已保存',
+  saveFailed: '保存失败，请检查输入或设置文件。',
+} as const
+
+/** Deepseek-Files dictionary key. */
+export type DeepseekFilesLocaleKey = keyof typeof zh
+
+/** English Deepseek-Files settings copy. */
+export const en: Record<DeepseekFilesLocaleKey, string> = {
+  nav: 'Deepseek-Files',
+  title: 'Deepseek-Files',
+  intro: 'Configure document OCR, audio transcription, and video understanding services. Plain text, Markdown, Office files, and extractable PDFs remain local.',
+  loading: 'Loading recognition settings…',
+  unavailable: 'The current runtime has not loaded Deepseek-Files settings.',
+  readOnly: 'The current settings source is read-only.',
+  ocrTitle: 'OCR',
+  ocrDescription: 'The selected route receives images or PDFs natively when supported; otherwise OCR accepts Chat Completions file or image_url content.',
+  audioTitle: 'Audio transcription',
+  audioDescription: 'The selected route receives audio natively when supported; otherwise the endpoint accepts an OpenAI-compatible Audio Transcriptions multipart request.',
+  videoTitle: 'Video understanding',
+  videoDescription: 'The selected route receives video natively when supported; otherwise the endpoint accepts OpenAI-compatible Chat Completions video_url content.',
+  model: 'Model ID',
+  modelPlaceholder: 'Enter a model ID',
+  endpoint: 'API Base URL / Endpoint',
+  endpointPlaceholder: 'https://provider.example/v1',
+  apiKey: 'API key',
+  apiKeyPlaceholder: 'Leave blank to keep the saved key',
+  keyConfigured: 'API key configured',
+  keyMissing: 'API key not configured; local or unauthenticated endpoints can leave it blank',
+  keyReadOnly: 'API key comes from a read-only credential source',
+  removeKey: 'Remove saved API key',
+  save: 'Save',
+  saving: 'Saving…',
+  saved: 'Saved',
+  saveFailed: 'Save failed. Check the values or settings file.',
+}

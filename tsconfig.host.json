@@ -1,0 +1,8 @@
+{
+  "files": [],
+  "references": [
+    { "path": "packages/attachment/file-recognizer-office" },
+    { "path": "packages/lark/lark" },
+    { "path": "packages/llm/model-catalog" }
+  ]
+}

@@ -1,0 +1,11 @@
+{
+  "id": "Deepseek-Files",
+  "displayName": "Deepseek-Files",
+  "category": "files",
+  "version": "0.1.1-rc.2",
+  "sourcePackages": [
+    "packages/attachment/file-recognizer-office",
+    "packages/client/ui-deepseek-files"
+  ],
+  "defaultInstalled": true
+}

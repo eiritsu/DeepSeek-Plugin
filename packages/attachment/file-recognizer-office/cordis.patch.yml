@@ -1,0 +1,5 @@
+- insert:
+    - id: file-recognizer-office
+      name: '@deepseek-ai/dsh-file-recognizer-office'
+    - id: ui-deepseek-files
+      name: '@deepseek-ai/dsh-client-ui-deepseek-files'
