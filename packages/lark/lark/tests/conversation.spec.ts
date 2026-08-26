@@ -81,12 +81,20 @@ class FakeChannel {
   }
 }
 
-function harness(options: { persisted?: boolean; responseWithAttachments?: boolean } = {}): {
+function harness(options: {
+  persisted?: boolean
+  responseWithAttachments?: boolean
+  workspaceExists?: boolean
+  attachError?: Error
+} = {}): {
   readonly ctx: Context
   readonly followups: UserMessage[]
   readonly created: SessionId[]
   readonly createdCwds: Array<string | undefined>
+  readonly setupTimeZones: string[]
   readonly resumed: SessionId[]
+  readonly attached: SessionId[]
+  readonly workspaceCreates: string[]
   readonly disposed: ReturnType<typeof vi.fn>
   readonly savedImages: ReturnType<typeof vi.fn>
   readonly savedFiles: ReturnType<typeof vi.fn>
@@ -97,10 +105,24 @@ function harness(options: { persisted?: boolean; responseWithAttachments?: boole
   const followups: UserMessage[] = []
   const created: SessionId[] = []
   const createdCwds: Array<string | undefined> = []
+  const setupTimeZones: string[] = []
   const resumed: SessionId[] = []
+  const attached: SessionId[] = []
+  const workspaceCreates: string[] = []
   const disposed = vi.fn(async () => {})
   const savedImages = vi.fn(async () => [IMAGE_REF])
   const savedFiles = vi.fn(async () => [FILE_REF])
+  const agentCtx = {
+    plugin: vi.fn(async (_plugin: unknown, config: { timeZone: string }) => {
+      setupTimeZones.push(config.timeZone)
+    }),
+  } as unknown as Context
+  const workspace = {
+    attachSession: vi.fn(async (sessionId: SessionId) => {
+      if (options.attachError !== undefined) throw options.attachError
+      attached.push(sessionId)
+    }),
+  }
 
   const emit = (session: FakeSession, event: FakeEvent): void => {
     session.events.push(event)
@@ -134,7 +156,14 @@ function harness(options: { persisted?: boolean; responseWithAttachments?: boole
     } as unknown as Agent
     agents.set(sessionId, agent)
     sessions.set(sessionId, session)
-    return { agent, dispose: disposed }
+    return {
+      agent,
+      dispose: async () => {
+        await disposed()
+        agents.delete(sessionId)
+        sessions.delete(sessionId)
+      },
+    }
   }
 
   const ctx = {
@@ -147,13 +176,22 @@ function harness(options: { persisted?: boolean; responseWithAttachments?: boole
     },
     agents: {
       get: (id: SessionId) => agents.get(id),
-      create: vi.fn(async ({ sessionId, meta }: { sessionId: SessionId; meta?: { cwd?: string } }) => {
+      create: vi.fn(async ({ sessionId, meta, setup }: {
+        sessionId: SessionId
+        meta?: { cwd?: string }
+        setup?: (ctx: Context) => void | Promise<void>
+      }) => {
         created.push(sessionId)
         createdCwds.push(meta?.cwd)
+        await setup?.(agentCtx)
         return makeHandle(sessionId)
       }),
-      resume: vi.fn(async ({ resumeSessionId }: { resumeSessionId: SessionId }) => {
+      resume: vi.fn(async ({ resumeSessionId, setup }: {
+        resumeSessionId: SessionId
+        setup?: (ctx: Context) => void | Promise<void>
+      }) => {
         resumed.push(resumeSessionId)
+        await setup?.(agentCtx)
         return makeHandle(resumeSessionId)
       }),
     },
@@ -171,8 +209,27 @@ function harness(options: { persisted?: boolean; responseWithAttachments?: boole
       readImage: vi.fn(async () => ({ ref: IMAGE_REF, data: new Uint8Array([1, 2, 3]) })),
       readFile: vi.fn(async () => ({ ref: FILE_REF, data: new Uint8Array([4, 5, 6, 7]) })),
     },
+    workspaceRegistry: {
+      resolveByPath: vi.fn(async () => options.workspaceExists === false ? undefined : workspace),
+      create: vi.fn(async (path: string) => {
+        workspaceCreates.push(path)
+        return workspace
+      }),
+    },
   } as unknown as Context
-  return { ctx, followups, created, createdCwds, resumed, disposed, savedImages, savedFiles }
+  return {
+    ctx,
+    followups,
+    created,
+    createdCwds,
+    setupTimeZones,
+    resumed,
+    attached,
+    workspaceCreates,
+    disposed,
+    savedImages,
+    savedFiles,
+  }
 }
 
 describe('LarkConversationBridge', () => {
@@ -192,6 +249,7 @@ describe('LarkConversationBridge', () => {
       allowedSenderId: 'ou_allowed',
       responseTimeoutMs: 1_000,
       cwd: '/workspace',
+      timeZone: 'Asia/Shanghai',
     })
     await bridge.connect()
     await channel.emitMessage(inbound())
@@ -199,6 +257,8 @@ describe('LarkConversationBridge', () => {
 
     expect(runtime.created).toEqual([larkSessionId('cli_app', 'oc_chat')])
     expect(runtime.createdCwds).toEqual(['/workspace'])
+    expect(runtime.setupTimeZones).toEqual(['Asia/Shanghai'])
+    expect(runtime.attached).toEqual([larkSessionId('cli_app', 'oc_chat')])
     expect(runtime.followups).toHaveLength(1)
     expect(runtime.followups[0]?.source).toEqual({
       kind: 'lark',
@@ -221,6 +281,7 @@ describe('LarkConversationBridge', () => {
       allowedSenderId: 'ou_allowed',
       responseTimeoutMs: 1_000,
       cwd: '/workspace',
+      timeZone: 'Asia/Shanghai',
     })
     await bridge.connect()
     await channel.emitMessage(inbound({
@@ -250,13 +311,14 @@ describe('LarkConversationBridge', () => {
   })
 
   it('resumes a persisted chat and rejects groups or other senders', async () => {
-    const runtime = harness({ persisted: true })
+    const runtime = harness({ persisted: true, workspaceExists: false })
     const channel = new FakeChannel()
     const bridge = new LarkConversationBridge(runtime.ctx, channel as unknown as LarkChannel, {
       appId: 'cli_app',
       allowedSenderId: 'ou_allowed',
       responseTimeoutMs: 1_000,
       cwd: '/workspace',
+      timeZone: 'Asia/Shanghai',
     })
     await bridge.connect()
     await channel.emitMessage(inbound({ chatType: 'group' }))
@@ -265,7 +327,31 @@ describe('LarkConversationBridge', () => {
 
     expect(runtime.created).toEqual([])
     expect(runtime.resumed).toEqual([larkSessionId('cli_app', 'oc_chat')])
+    expect(runtime.workspaceCreates).toEqual(['/workspace'])
+    expect(runtime.setupTimeZones).toEqual(['Asia/Shanghai'])
+    expect(runtime.attached).toEqual([larkSessionId('cli_app', 'oc_chat')])
     expect(runtime.followups).toHaveLength(1)
     await bridge.dispose()
+  })
+
+  it('disposes an unpublished chat owner when Workspace attachment fails', async () => {
+    const runtime = harness({ attachError: new Error('attach failed') })
+    const channel = new FakeChannel()
+    const bridge = new LarkConversationBridge(runtime.ctx, channel as unknown as LarkChannel, {
+      appId: 'cli_app',
+      allowedSenderId: 'ou_allowed',
+      responseTimeoutMs: 1_000,
+      cwd: '/workspace',
+      timeZone: 'Asia/Shanghai',
+    })
+    await bridge.connect()
+
+    await channel.emitMessage(inbound())
+
+    expect(runtime.disposed).toHaveBeenCalledOnce()
+    expect(runtime.followups).toEqual([])
+    expect(channel.replies).toEqual([{ text: '处理消息时发生错误，请稍后重试。' }])
+    await bridge.dispose()
+    expect(runtime.disposed).toHaveBeenCalledOnce()
   })
 })

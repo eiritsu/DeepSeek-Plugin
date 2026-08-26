@@ -34,8 +34,10 @@ overrides:
   '@deepseek-ai/dsh-storage-domain': 'link:../DeepSeek Harness/packages/storage/storage-domain'
   '@deepseek-ai/dsh-storage-json': 'link:../DeepSeek Harness/packages/storage/storage-json'
   '@deepseek-ai/dsh-subprocess': 'link:../DeepSeek Harness/packages/subprocess/subprocess'
+  '@deepseek-ai/dsh-time-context': 'link:../DeepSeek Harness/packages/context/time-context'
   '@deepseek-ai/dsh-tools': 'link:../DeepSeek Harness/packages/core/tools'
   '@deepseek-ai/dsh-typert-protocol': 'link:../DeepSeek Harness/packages/typert/protocol'
+  '@deepseek-ai/dsh-workspace': 'link:../DeepSeek Harness/packages/workspace/workspace'
 
 allowBuilds:
   esbuild: true

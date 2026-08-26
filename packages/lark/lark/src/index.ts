@@ -74,6 +74,8 @@ export interface Config {
   conversationResponseTimeoutMs?: number
   /** Workspace assigned to newly created private-chat sessions; empty uses the runtime directory. */
   conversationCwd?: string
+  /** IANA time zone used to interpret otherwise-unqualified Lark dates and times. */
+  conversationTimeZone?: string
 }
 
 /** Schemastery configuration for the Lark integration. */
@@ -91,6 +93,7 @@ export const Config: z<Config> = z.object({
   conversationHandshakeTimeoutMs: z.number().step(1).min(1_000).max(300_000).default(30_000),
   conversationResponseTimeoutMs: z.number().step(1).min(10_000).max(30 * 60_000).default(10 * 60_000),
   conversationCwd: z.string().default(''),
+  conversationTimeZone: z.string().default('Asia/Shanghai'),
 })
 
 /** Application values accepted from the management page. */
@@ -236,7 +239,7 @@ function message(error: unknown): string {
 export default class LarkManagementGateway extends TypertRemoteService {
   static inject = [
     'agents', 'agentDefaultModel', 'attachments', 'credentials', 'sessionPersistence',
-    'settings', 'subprocess', 'tools',
+    'settings', 'subprocess', 'tools', 'workspaceRegistry',
   ]
   private readonly settings: SettingsScope<Config>
   private readonly readOnlyCommandCache = new Map<string, boolean>()
@@ -521,6 +524,7 @@ export default class LarkManagementGateway extends TypertRemoteService {
       conversationHandshakeTimeoutMs: current.conversationHandshakeTimeoutMs ?? 30_000,
       conversationResponseTimeoutMs: current.conversationResponseTimeoutMs ?? 10 * 60_000,
       conversationCwd: current.conversationCwd ?? '',
+      conversationTimeZone: current.conversationTimeZone ?? 'Asia/Shanghai',
     }
   }
 
@@ -582,6 +586,7 @@ export default class LarkManagementGateway extends TypertRemoteService {
       allowedSenderId,
       responseTimeoutMs: config.conversationResponseTimeoutMs,
       cwd: config.conversationCwd.trim() || process.cwd(),
+      timeZone: config.conversationTimeZone,
     })
     try {
       await bridge.connect()

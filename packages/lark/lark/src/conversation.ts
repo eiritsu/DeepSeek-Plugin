@@ -20,6 +20,8 @@ import type { AssistantMessage, ContentBlock } from '@deepseek-ai/dsh-llm'
 import type {} from '@deepseek-ai/dsh-llm/message'
 import { SessionId } from '@deepseek-ai/dsh-session'
 import type {} from '@deepseek-ai/dsh-session-persistence'
+import * as timeContext from '@deepseek-ai/dsh-time-context'
+import type { Workspace } from '@deepseek-ai/dsh-workspace'
 import type { LarkChannel, NormalizedMessage, ResourceDescriptor } from '@larksuite/channel'
 
 declare module '@deepseek-ai/dsh-llm/message' {
@@ -67,6 +69,8 @@ export interface LarkConversationOptions {
   readonly responseTimeoutMs: number
   /** Workspace used by newly created chat sessions. */
   readonly cwd: string
+  /** IANA time zone used when Lark supplies no browser time-zone provenance. */
+  readonly timeZone: string
 }
 
 const IMAGE_MEDIA_TYPES: ReadonlySet<string> = new Set<ImageMediaType>([
@@ -373,22 +377,40 @@ export class LarkConversationBridge {
   }
 
   private async createOrResumeAgent(sessionId: SessionId): Promise<Agent> {
+    const workspace = await this.resolveWorkspace()
     const stored = (await this.ctx.sessionPersistence.list(this.abort.signal))
       .some(header => header.id === sessionId)
     const selection = this.ctx.agentDefaultModel.currentSelection()
+    const setup = async (agentCtx: Context): Promise<void> => {
+      await agentCtx.plugin(timeContext, { timeZone: this.options.timeZone })
+    }
     const handle = stored
       ? await this.ctx.agents.resume({
           resumeSessionId: sessionId,
           agentOptions: { provider: selection.provider, model: selection.model },
           signal: this.abort.signal,
+          setup,
         })
       : await this.ctx.agents.create({
           sessionId,
           agentOptions: { provider: selection.provider, model: selection.model },
           signal: this.abort.signal,
           meta: { cwd: this.options.cwd },
+          setup,
         })
+    try {
+      await workspace.attachSession(sessionId)
+    } catch (error) {
+      await handle.dispose()
+      throw error
+    }
     this.handles.set(sessionId, handle)
     return handle.agent
+  }
+
+  /** Resolve the configured directory to one durable, user-renamable Workspace. */
+  private async resolveWorkspace(): Promise<Workspace> {
+    return await this.ctx.workspaceRegistry.resolveByPath(this.options.cwd)
+      ?? await this.ctx.workspaceRegistry.create(this.options.cwd)
   }
 }
