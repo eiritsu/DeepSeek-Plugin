@@ -7,5 +7,12 @@
     "packages/attachment/file-recognizer-office",
     "packages/client/ui-deepseek-files"
   ],
+  "integrationMode": "requires-harness-extension-points",
+  "compatibilityReadme": "packages/attachment/file-recognizer-office/README.zh.md#需要的-harness-底层扩展点",
+  "requiredHarnessCapabilities": [
+    "attachment.file-recognizer",
+    "host.durable-attachment-recognition",
+    "host.credentials-rpc"
+  ],
   "defaultInstalled": true
 }

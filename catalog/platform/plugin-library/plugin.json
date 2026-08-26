@@ -6,6 +6,7 @@
   "sourcePackages": [
     "packages/client/ui-plugin-library"
   ],
+  "integrationMode": "desktop-assisted-sideload",
   "desktopBridge": "desktop-shell/Sources/DeepSeekHarnessDesktop/PluginManager.swift",
   "artifactPattern": "deepseek-ai-dsh-client-ui-plugin-library-*.tgz",
   "defaultInstalled": true

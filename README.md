@@ -1,17 +1,19 @@
 # DeepSeek Plugin
 
-DeepSeek Harness 的自主插件工作区。这里保存可独立构建、打包和侧载的产品插件；侧载包通过 DSH 公开的插件、Settings、Credentials、Remote 与客户端插槽运行，不改动 Harness 源码、数据库格式或默认沙盒策略。
+DeepSeek Harness 的自主插件工作区。这里同时保存可直接侧载的产品插件，以及依赖 DSH 已集成扩展点的内置扩展。插件包不会在安装时修改 Harness 源码、数据库格式或默认沙盒策略；标记为“需要 DSH 扩展点”的插件只能安装到已经包含对应底层能力的兼容版本。
 
 当前源码包括 Deepseek-Files、模型目录、插件库界面、macOS 桌面壳，以及 Lark/飞书管理插件。插件库的“审查安装”支持固定网络来源和本地插件目录；社区条目可直接送入同一审查流程。GitHub Topic 发布与公开插件市场发布不在本阶段范围内。
 
 ## 插件分类
 
-`catalog/` 是面向用户和插件市场的分类目录，`packages/` 是工程构建目录。每个分类项使用 `plugin.json` 指向实际源码包，避免为了展示分类而复制源码。
+`catalog/` 是面向用户和插件市场的分类目录，`packages/` 是工程构建目录。每个分类项使用 `plugin.json` 指向实际源码包和兼容性说明，避免为了展示分类而复制源码。
 
-- `catalog/collaboration/`：协作与通信，例如 Lark/飞书。
-- `catalog/files/`：文件解析与多模态识别，例如 Deepseek-Files。
-- `catalog/models/`：模型元数据与能力补全，例如 dsh-model-catalog。
-- `catalog/platform/`：Harness 管理界面与平台扩展，例如插件库。
+| 分类目录 | 插件 | 集成方式 |
+| --- | --- | --- |
+| [`catalog/collaboration/`](catalog/collaboration/) | [Lark / 飞书](packages/lark/lark/README.md) | 兼容 DSH 可直接侧载 |
+| [`catalog/files/`](catalog/files/) | [Deepseek-Files](packages/attachment/file-recognizer-office/README.zh.md) | [需要附件识别与 prompt 准入扩展点](packages/attachment/file-recognizer-office/README.zh.md#需要的-harness-底层扩展点) |
+| [`catalog/models/`](catalog/models/) | [dsh-model-catalog](packages/llm/model-catalog/README.zh.md) | [需要模型发现与输入模态解析扩展点](packages/llm/model-catalog/README.zh.md#需要的-harness-底层扩展点) |
+| [`catalog/platform/`](catalog/platform/) | [插件库](packages/client/ui-plugin-library/README.zh.md) | UI 可侧载；本地目录选择需要配套桌面桥 |
 
 ## 开发
 

@@ -19,6 +19,16 @@ dsh plugin --profile <custom-profile> add @deepseek-ai/dsh-model-catalog
 
 The package declares `dsh.bundle.patch`, so custom-profile installation adds it to the ordered Bundle list. Existing Web profiles with the shipped application prefix receive a missing default catalog Bundle on their next launch; custom Bundles remain in place.
 
+## Required Harness extension points
+
+This Bundle is independently packaged but requires model-metadata extension points that are not present in an unmodified DSH runtime:
+
+- `@deepseek-ai/dsh-llm` provides ordered `registerModelDiscoveryEnricher()`, `registerModelInputResolver()`, and `resolveModelInput()` APIs. Their owning implementation lives in `packages/llm/llm/src/index.ts` and their public types live in `packages/llm/llm/src/types.ts` in the Harness source tree.
+- `@deepseek-ai/dsh-llm-pi-ai` asks the LLM service for external exact-model input metadata before applying its installed-catalog fallback. The owning adapter integration lives in `packages/llm/llm-pi-ai/src/adapter.ts`.
+- Host model discovery and the Models settings page preserve the upstream `owned_by` value and optional `inputModalities`, so a gateway model can be matched against the correct catalog owner.
+
+The side-loaded package contributes catalog data through those APIs; it does not add the APIs, infer reasoning-effort support, or rewrite provider settings. A DSH build without these extension points is incompatible and must be upgraded first. Once they are part of the Harness baseline, catalog refresh behavior can be updated independently through this Bundle.
+
 ## Model Experience
 
 ### Dynamic native attachment admission

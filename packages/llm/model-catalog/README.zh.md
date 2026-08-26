@@ -19,6 +19,16 @@ dsh plugin --profile <custom-profile> add @deepseek-ai/dsh-model-catalog
 
 本包声明了 `dsh.bundle.patch`，因此向自定义 profile 安装时会把它加入有序 Bundle 列表。具有随发行版提供的应用前缀的既有 Web profile，会在下次启动时补入缺失的默认 catalog Bundle，同时保留自定义 Bundle。
 
+## 需要的 Harness 底层扩展点
+
+这个 Bundle 可以独立打包，但依赖未修改 DSH runtime 中不存在的模型元数据扩展点：
+
+- `@deepseek-ai/dsh-llm` 提供有序的 `registerModelDiscoveryEnricher()`、`registerModelInputResolver()` 和 `resolveModelInput()` API；Harness 源码中的所有者实现位于 `packages/llm/llm/src/index.ts`，公开类型位于 `packages/llm/llm/src/types.ts`。
+- `@deepseek-ai/dsh-llm-pi-ai` 会先向 LLM service 查询外部精确模型输入元数据，再使用已安装 catalog 回退；Harness 源码中的所有者适配位于 `packages/llm/llm-pi-ai/src/adapter.ts`。
+- Host 模型发现和模型设置页会保留上游 `owned_by` 与可选 `inputModalities`，使网关模型可以匹配正确的 catalog owner。
+
+侧载包只通过这些 API 提供 catalog 数据，不会自行增加 API、推断推理等级支持或改写提供方设置。缺少这些扩展点的 DSH 版本不兼容，必须先升级主程序；扩展点进入 Harness 基线后，catalog 刷新逻辑才可以通过这个 Bundle 独立更新。
+
 ## 模型体验
 
 ### 动态原生附件准入

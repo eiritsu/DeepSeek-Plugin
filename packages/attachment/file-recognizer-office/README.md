@@ -8,6 +8,16 @@ Install it through the desktop plugin review flow using an exact npm version or 
 
 Each remote capability has a Model ID, an API Base URL or complete Endpoint URL, and a managed API key. A URL ending in `/v1` or `/api/v1` receives the standard `chat/completions` or `audio/transcriptions` operation path; any other URL is requested unchanged. OCR and video use OpenAI-compatible Chat Completions content (`file`/`image_url` and `video_url` respectively); audio uses an OpenAI-compatible Audio Transcriptions multipart request. API key values live in the credentials provider under `DEEPSEEK_FILES_OCR_API_KEY`, `DEEPSEEK_FILES_AUDIO_API_KEY`, and `DEEPSEEK_FILES_VIDEO_API_KEY`; settings store only those references. An empty Model ID or URL disables that remote capability. Extractable text and documents stay local. At prompt admission the selected route's effective modalities decide each media file: native `image`, `audio`, `video`, or `pdf` bypasses its recognizer, while an unsupported modality runs the configured fallback and records its text. Unsupported audio, video, or PDF input is refused when neither native transport nor recognition produces content.
 
+## Required Harness extension points
+
+This Bundle is independently packaged but is not portable to an unmodified DSH runtime. The compatible Harness build must already provide the following owner-side capabilities:
+
+- `@deepseek-ai/dsh-attachment` defines `FileRecognizer` and `AttachmentService.registerFileRecognizer()`. The owning implementation lives in `packages/attachment/attachment/src/types.ts` and `packages/attachment/attachment/src/index.ts` in the Harness source tree.
+- Host prompt admission resolves the selected model's effective input modalities, invokes attachment recognition for unsupported media, and records returned text in the durable file or image content block before the request becomes model-visible. The owning integration lives in `packages/host/apiproxy/src/api-proxy.ts`.
+- The Host Credentials RPC and client Settings slots accept write-only API keys and dynamic settings pages. The plugin stores only credential references in settings and cannot read a saved key back into the browser.
+
+The side-loaded package registers implementations on those extension points; it does not add them, monkey-patch the agent loop, or change the database and sandbox. A DSH build without these capabilities is incompatible and must be upgraded before installation. Once the capabilities are present, recognizer and Settings UI updates can be shipped independently through this Bundle.
+
 ## Model Experience
 
 ### Recognized attachment text

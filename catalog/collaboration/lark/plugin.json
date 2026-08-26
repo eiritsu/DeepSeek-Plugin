@@ -7,6 +7,7 @@
     "packages/lark/lark",
     "packages/client/ui-lark"
   ],
+  "integrationMode": "standalone-sideload",
   "artifactPattern": "deepseek-ai-dsh-lark-*.tgz",
   "defaultInstalled": false
 }

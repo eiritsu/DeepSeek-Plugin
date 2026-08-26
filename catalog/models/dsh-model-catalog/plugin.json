@@ -6,5 +6,12 @@
   "sourcePackages": [
     "packages/llm/model-catalog"
   ],
+  "integrationMode": "requires-harness-extension-points",
+  "compatibilityReadme": "packages/llm/model-catalog/README.zh.md#需要的-harness-底层扩展点",
+  "requiredHarnessCapabilities": [
+    "llm.model-discovery-enricher",
+    "llm.model-input-resolver",
+    "llm-pi-ai.external-input-resolution"
+  ],
   "defaultInstalled": true
 }

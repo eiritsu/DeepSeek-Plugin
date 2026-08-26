@@ -8,6 +8,16 @@
 
 每项远程能力分别配置 Model ID、API Base URL 或完整 Endpoint URL，以及托管 API key。以 `/v1` 或 `/api/v1` 结尾的 URL 会自动补充标准 `chat/completions` 或 `audio/transcriptions` 操作路径；其他 URL 保持原样请求。OCR 与视频使用 OpenAI-compatible Chat Completions 内容（分别为 `file`/`image_url` 与 `video_url`），音频使用 OpenAI-compatible Audio Transcriptions multipart 请求。API key 值由 credentials provider 分别保存在 `DEEPSEEK_FILES_OCR_API_KEY`、`DEEPSEEK_FILES_AUDIO_API_KEY` 和 `DEEPSEEK_FILES_VIDEO_API_KEY`；settings 只保存这些引用。Model ID 或 URL 为空时，对应远程能力关闭。可提取的文本和文档始终在本机处理。Prompt 准入会按所选路由的有效模态决定每个媒体文件：原生 `image`、`audio`、`video` 或 `pdf` 会绕过对应识别器，不支持的模态则调用已配置回退并记录其文本。既没有原生传输、识别又没有产出内容时，不支持的音频、视频或 PDF 输入会被拒绝。
 
+## 需要的 Harness 底层扩展点
+
+这个 Bundle 可以独立打包，但不能安装到未修改的 DSH runtime。兼容的 Harness 版本必须已经提供以下主程序能力：
+
+- `@deepseek-ai/dsh-attachment` 定义 `FileRecognizer` 和 `AttachmentService.registerFileRecognizer()`；Harness 源码中的所有者文件是 `packages/attachment/attachment/src/types.ts` 与 `packages/attachment/attachment/src/index.ts`。
+- Host prompt 准入会解析当前模型的有效输入模态，对模型不支持的媒体调用附件识别，并在请求对模型可见前把返回文本记录进 durable file 或 image 内容块；Harness 源码中的所有者集成位于 `packages/host/apiproxy/src/api-proxy.ts`。
+- Host Credentials RPC 与客户端 Settings 插槽支持 write-only API key 和动态设置页。插件只把凭据引用写入 settings，浏览器不能读取已保存的 key 值。
+
+侧载包只在这些扩展点上注册实现，不会自行增加扩展点、修改 agent loop、数据库或沙箱。缺少上述能力的 DSH 版本不兼容，必须先升级主程序；底层能力存在后，识别器和设置界面才可以通过这个 Bundle 独立更新。
+
 ## 模型体验
 
 ### 已识别附件文本
