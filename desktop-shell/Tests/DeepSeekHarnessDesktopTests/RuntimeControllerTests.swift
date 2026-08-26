@@ -4,6 +4,24 @@ import Foundation
 import Testing
 @testable import DeepSeekHarnessDesktop
 
+@Test func runtimeInstanceLockRejectsSecondOwnerUntilRelease() throws {
+  let root = FileManager.default.temporaryDirectory
+    .appendingPathComponent("dsh-runtime-lock-\(UUID().uuidString)", isDirectory: true)
+  defer { try? FileManager.default.removeItem(at: root) }
+  var first: RuntimeInstanceLock? = try RuntimeInstanceLock(supportRoot: root)
+
+  #expect(throws: RuntimeInstanceLockError.alreadyRunning(processIdentifier: getpid())) {
+    try RuntimeInstanceLock(supportRoot: root)
+  }
+
+  first?.release()
+  first = nil
+  #expect(throws: Never.self) {
+    try RuntimeInstanceLock(supportRoot: root)
+  }
+  _ = first
+}
+
 @Test @MainActor func fullSizeTitlebarRetainsNativeWindowMovement() {
   let window = makeDesktopWindow()
   let region = WindowDragRegionView()

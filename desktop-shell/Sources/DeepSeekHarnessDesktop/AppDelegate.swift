@@ -33,6 +33,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNa
   private let sources = SourceManager()
   private lazy var runtime = RuntimeController(supportRoot: sources.supportRoot)
   private lazy var plugins = PluginManager(supportRoot: sources.supportRoot, dshHome: sources.dshHome)
+  private var instanceLock: RuntimeInstanceLock?
   private var sourceRoot: URL?
   private var runtimeURL: URL?
   private var activeRecoveryProfile: DesktopRecoveryProfile?
@@ -57,6 +58,24 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNa
   private let windowDragRegion = WindowDragRegionView()
 
   func applicationDidFinishLaunching(_ notification: Notification) {
+    do {
+      instanceLock = try RuntimeInstanceLock(supportRoot: sources.supportRoot)
+    } catch let RuntimeInstanceLockError.alreadyRunning(processIdentifier) {
+      if let processIdentifier {
+        NSRunningApplication(processIdentifier: processIdentifier)?.activate(options: [
+          .activateAllWindows,
+          .activateIgnoringOtherApps,
+        ])
+      }
+      NSApp.terminate(nil)
+      return
+    } catch {
+      configureWindow()
+      configureMenu()
+      spinner.stopAnimation(nil)
+      statusLabel.stringValue = error.localizedDescription
+      return
+    }
     configureWindow()
     configureMenu()
     start()
@@ -840,6 +859,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNa
     activeRecoveryProfile = nil
     runtime.stop {
       DispatchQueue.main.async {
+        self.instanceLock?.release()
+        self.instanceLock = nil
         guard let recovery else {
           sender.reply(toApplicationShouldTerminate: true)
           return
