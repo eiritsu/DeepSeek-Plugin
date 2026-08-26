@@ -12,6 +12,7 @@ import { settingsNamespace, type SettingsScope } from '@deepseek-ai/dsh-settings
 import type { SubprocessHandle } from '@deepseek-ai/dsh-subprocess'
 import { defineTool, type PreToolDecision } from '@deepseek-ai/dsh-tools'
 import { Remote, TypertRemoteService } from '@deepseek-ai/dsh-typert-protocol'
+import { authenticatedUserOpenId } from './auth-status.ts'
 import {
   commandHelpArguments,
   helpDeclaresReadOnly,
@@ -488,8 +489,7 @@ export default class LarkManagementGateway extends TypertRemoteService {
     const result = await this.runCli(['auth', 'login', '--device-code', pending.deviceCode, '--json'])
     if (result.exitCode !== 0) throw new Error(result.stderr || 'Lark user authorization failed')
     const auth = record(await this.runJson(['auth', 'status', '--json']))
-    const user = record(record(auth?.identities)?.user)
-    const openId = stringValue(user?.openId)
+    const openId = authenticatedUserOpenId(auth)
     if (openId === undefined) throw new Error('Lark CLI completed user authorization without reporting an Open ID')
     await this.settings.update({ conversationUserOpenId: openId })
     await this.ctx.credentials.unset(LARK_PENDING_USER_AUTH_REF)
@@ -549,7 +549,8 @@ export default class LarkManagementGateway extends TypertRemoteService {
       this.conversationState = { status: 'waiting', diagnostic: '请先连接飞书应用。' }
       return
     }
-    if (config.conversationUserOpenId.length === 0) {
+    const allowedSenderId = await this.resolveConversationUserOpenId(config)
+    if (allowedSenderId === undefined) {
       this.conversationState = { status: 'waiting', diagnostic: '请完成当前用户授权，以限定可发起对话的飞书账号。' }
       return
     }
@@ -574,11 +575,11 @@ export default class LarkManagementGateway extends TypertRemoteService {
       httpTimeoutMs: config.cliTimeoutMs,
       policy: {
         dmMode: 'allowlist',
-        dmAllowlist: [config.conversationUserOpenId],
+        dmAllowlist: [allowedSenderId],
       },
     }), {
       appId: config.appId,
-      allowedSenderId: config.conversationUserOpenId,
+      allowedSenderId,
       responseTimeoutMs: config.conversationResponseTimeoutMs,
       ...config.conversationCwd.trim().length === 0 ? {} : { cwd: config.conversationCwd.trim() },
     })
@@ -594,6 +595,19 @@ export default class LarkManagementGateway extends TypertRemoteService {
       await bridge.dispose()
       throw error
     }
+  }
+
+  private async resolveConversationUserOpenId(config: Required<Config>): Promise<string | undefined> {
+    if (config.conversationUserOpenId.length > 0) return config.conversationUserOpenId
+    let auth: unknown
+    try {
+      auth = await this.runJson(['auth', 'status', '--json', '--verify'])
+    } catch (_existingAuthorizationUnavailable) {
+      return undefined
+    }
+    const openId = authenticatedUserOpenId(auth)
+    if (openId !== undefined) await this.settings.update({ conversationUserOpenId: openId })
+    return openId
   }
 
   private capabilityStatus(

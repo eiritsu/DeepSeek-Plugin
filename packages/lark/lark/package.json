@@ -20,6 +20,7 @@
   },
   "files": [
     "lib/index.js",
+    "lib/auth-status.js",
     "lib/conversation.js",
     "lib/command-risk.js",
     "lib/pending-user-auth.js",

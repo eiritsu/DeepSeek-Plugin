@@ -62,8 +62,11 @@ describe('Lark generated Remote artifacts', () => {
   it('publishes the private-chat runtime imported by the Host entry', async () => {
     const root = resolve(import.meta.dirname, '..')
     const manifest = JSON.parse(readFileSync(resolve(root, 'package.json'), 'utf8')) as { files: string[] }
+    expect(manifest.files).toContain('lib/auth-status.js')
     expect(manifest.files).toContain('lib/conversation.js')
+    expect(existsSync(resolve(root, 'lib/auth-status.js'))).toBe(true)
     expect(existsSync(resolve(root, 'lib/conversation.js'))).toBe(true)
+    expect(readFileSync(resolve(root, 'lib/index.js'), 'utf8')).toContain('from "./auth-status.js"')
     expect(readFileSync(resolve(root, 'lib/index.js'), 'utf8')).toContain('from "./conversation.js"')
     expect((await import('../lib/index.js')).default).toBeTypeOf('function')
   })
