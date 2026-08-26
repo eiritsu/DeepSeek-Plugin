@@ -72,7 +72,7 @@ export interface Config {
   conversationHandshakeTimeoutMs?: number
   /** Maximum duration to wait for one Harness turn response. */
   conversationResponseTimeoutMs?: number
-  /** Optional workspace assigned to newly created private-chat sessions. */
+  /** Workspace assigned to newly created private-chat sessions; empty uses the runtime directory. */
   conversationCwd?: string
 }
 
@@ -581,7 +581,7 @@ export default class LarkManagementGateway extends TypertRemoteService {
       appId: config.appId,
       allowedSenderId,
       responseTimeoutMs: config.conversationResponseTimeoutMs,
-      ...config.conversationCwd.trim().length === 0 ? {} : { cwd: config.conversationCwd.trim() },
+      cwd: config.conversationCwd.trim() || process.cwd(),
     })
     try {
       await bridge.connect()

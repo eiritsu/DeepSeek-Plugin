@@ -65,13 +65,14 @@ export interface LarkConversationOptions {
   readonly allowedSenderId: string
   /** Maximum time to wait for the turn containing an accepted Lark message. */
   readonly responseTimeoutMs: number
-  /** Optional workspace used by newly created chat sessions. */
-  readonly cwd?: string
+  /** Workspace used by newly created chat sessions. */
+  readonly cwd: string
 }
 
 const IMAGE_MEDIA_TYPES: ReadonlySet<string> = new Set<ImageMediaType>([
   'image/png', 'image/jpeg', 'image/webp', 'image/gif',
 ])
+const LARK_SESSION_KEY_VERSION = 'cwd-v1'
 
 function normalizedMediaType(value: string | undefined): string | undefined {
   const mediaType = value?.split(';', 1)[0]?.trim().toLowerCase()
@@ -93,7 +94,10 @@ function imageMediaType(contentType: string | undefined, name: string | undefine
 
 /** Derive a stable opaque DSH identity without retaining the Lark chat id in filenames. */
 export function larkSessionId(appId: string, chatId: string): SessionId {
-  const digest = createHash('sha256').update(appId).update('\0').update(chatId).digest('hex')
+  const digest = createHash('sha256')
+    .update(LARK_SESSION_KEY_VERSION).update('\0')
+    .update(appId).update('\0')
+    .update(chatId).digest('hex')
   return SessionId(`lark-${digest.slice(0, 32)}`)
 }
 
@@ -382,7 +386,7 @@ export class LarkConversationBridge {
           sessionId,
           agentOptions: { provider: selection.provider, model: selection.model },
           signal: this.abort.signal,
-          ...this.options.cwd === undefined ? {} : { meta: { cwd: this.options.cwd } },
+          meta: { cwd: this.options.cwd },
         })
     this.handles.set(sessionId, handle)
     return handle.agent

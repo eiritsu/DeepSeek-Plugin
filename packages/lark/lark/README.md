@@ -12,6 +12,6 @@
 
 入站文本直接进入用户消息；图片和文件由 Channel 下载后保存到 DSH attachment store，并附带可用的识别文本。assistant 回复中的文本、图片 attachment 和文件 attachment 会依次回复到原飞书消息。文件能力以结构化 attachment block 为准，不会把回复文本中的本地路径当作待上传文件。
 
-对话连接默认启用，可通过 `conversationEnabled` 关闭。`conversationUserOpenId`、`conversationHandshakeTimeoutMs`、`conversationResponseTimeoutMs` 和 `conversationCwd` 可在 Cordis 配置中覆盖；管理页连接流程会自动维护允许的用户 Open ID。插件卸载或重载会先停止入站、等待在途消息处理结束，再断开 Channel 并释放其创建或恢复的 Agent。
+对话连接默认启用，可通过 `conversationEnabled` 关闭。`conversationUserOpenId`、`conversationHandshakeTimeoutMs`、`conversationResponseTimeoutMs` 和 `conversationCwd` 可在 Cordis 配置中覆盖；`conversationCwd` 为空时，新私聊会话使用 DSH 运行目录。管理页连接流程会自动维护允许的用户 Open ID。插件卸载或重载会先停止入站、等待在途消息处理结束，再断开 Channel 并释放其创建或恢复的 Agent。
 
 安装本包会通过 `cordis.patch.yml` 同时加入 Host 插件和 Lark 管理页面，不会修改 DeepSeek Harness 源码或数据库格式。

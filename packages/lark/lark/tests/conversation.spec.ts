@@ -1,9 +1,10 @@
 import { Buffer } from 'node:buffer'
+import { createHash } from 'node:crypto'
 import type { Context } from '@deepseek-ai/cordis'
 import type { Agent, AgentHandle } from '@deepseek-ai/dsh-agent'
 import { AttachmentId, type FileAttachmentRef, type ImageAttachmentRef } from '@deepseek-ai/dsh-attachment'
 import { createAssistantMessage, type UserMessage } from '@deepseek-ai/dsh-llm'
-import type { SessionId } from '@deepseek-ai/dsh-session'
+import { SessionId } from '@deepseek-ai/dsh-session'
 import type { LarkChannel, NormalizedMessage, SendInput } from '@larksuite/channel'
 import { describe, expect, it, vi } from 'vitest'
 import { LarkConversationBridge, larkSessionId } from '../src/conversation.ts'
@@ -84,6 +85,7 @@ function harness(options: { persisted?: boolean; responseWithAttachments?: boole
   readonly ctx: Context
   readonly followups: UserMessage[]
   readonly created: SessionId[]
+  readonly createdCwds: Array<string | undefined>
   readonly resumed: SessionId[]
   readonly disposed: ReturnType<typeof vi.fn>
   readonly savedImages: ReturnType<typeof vi.fn>
@@ -94,6 +96,7 @@ function harness(options: { persisted?: boolean; responseWithAttachments?: boole
   const agents = new Map<SessionId, Agent>()
   const followups: UserMessage[] = []
   const created: SessionId[] = []
+  const createdCwds: Array<string | undefined> = []
   const resumed: SessionId[] = []
   const disposed = vi.fn(async () => {})
   const savedImages = vi.fn(async () => [IMAGE_REF])
@@ -144,8 +147,9 @@ function harness(options: { persisted?: boolean; responseWithAttachments?: boole
     },
     agents: {
       get: (id: SessionId) => agents.get(id),
-      create: vi.fn(async ({ sessionId }: { sessionId: SessionId }) => {
+      create: vi.fn(async ({ sessionId, meta }: { sessionId: SessionId; meta?: { cwd?: string } }) => {
         created.push(sessionId)
+        createdCwds.push(meta?.cwd)
         return makeHandle(sessionId)
       }),
       resume: vi.fn(async ({ resumeSessionId }: { resumeSessionId: SessionId }) => {
@@ -168,7 +172,7 @@ function harness(options: { persisted?: boolean; responseWithAttachments?: boole
       readFile: vi.fn(async () => ({ ref: FILE_REF, data: new Uint8Array([4, 5, 6, 7]) })),
     },
   } as unknown as Context
-  return { ctx, followups, created, resumed, disposed, savedImages, savedFiles }
+  return { ctx, followups, created, createdCwds, resumed, disposed, savedImages, savedFiles }
 }
 
 describe('LarkConversationBridge', () => {
@@ -176,6 +180,8 @@ describe('LarkConversationBridge', () => {
     expect(larkSessionId('cli_app', 'oc_chat')).toBe(larkSessionId('cli_app', 'oc_chat'))
     expect(larkSessionId('cli_app', 'oc_chat')).not.toBe(larkSessionId('cli_other', 'oc_chat'))
     expect(larkSessionId('cli_app', 'oc_chat')).not.toBe(larkSessionId('cli_app', 'oc_other'))
+    const legacyDigest = createHash('sha256').update('cli_app').update('\0').update('oc_chat').digest('hex')
+    expect(larkSessionId('cli_app', 'oc_chat')).not.toBe(SessionId(`lark-${legacyDigest.slice(0, 32)}`))
   })
 
   it('logs one authorized private message and ignores its redelivery', async () => {
@@ -185,12 +191,14 @@ describe('LarkConversationBridge', () => {
       appId: 'cli_app',
       allowedSenderId: 'ou_allowed',
       responseTimeoutMs: 1_000,
+      cwd: '/workspace',
     })
     await bridge.connect()
     await channel.emitMessage(inbound())
     await channel.emitMessage(inbound())
 
     expect(runtime.created).toEqual([larkSessionId('cli_app', 'oc_chat')])
+    expect(runtime.createdCwds).toEqual(['/workspace'])
     expect(runtime.followups).toHaveLength(1)
     expect(runtime.followups[0]?.source).toEqual({
       kind: 'lark',
@@ -212,6 +220,7 @@ describe('LarkConversationBridge', () => {
       appId: 'cli_app',
       allowedSenderId: 'ou_allowed',
       responseTimeoutMs: 1_000,
+      cwd: '/workspace',
     })
     await bridge.connect()
     await channel.emitMessage(inbound({
@@ -247,6 +256,7 @@ describe('LarkConversationBridge', () => {
       appId: 'cli_app',
       allowedSenderId: 'ou_allowed',
       responseTimeoutMs: 1_000,
+      cwd: '/workspace',
     })
     await bridge.connect()
     await channel.emitMessage(inbound({ chatType: 'group' }))
