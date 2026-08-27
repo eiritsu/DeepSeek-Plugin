@@ -2,9 +2,9 @@
 
 [English](README.md) | 中文
 
-该 Profile Bundle 从实时 `models.dev` catalog 提供模型输入模态，通过 `storageDomain` 持久化 last-good 快照，并在动态源没有声明时使用 pi-ai 已安装 catalog。随发行版提供的 Web profile 默认启用它；其 patch 只挂载一个 Host 插件，不改动任何提供方配置。
+该 Profile Bundle 从实时 `models.dev` catalog 提供模型输入模态及上下文／输出容量，通过 `storageDomain` 持久化 last-good 快照，并在动态源没有声明时使用 pi-ai 已安装 catalog。随发行版提供的 Web profile 默认启用它；其 patch 只挂载一个 Host 插件，不改动任何提供方配置。
 
-插件仅在端点省略 `inputModalities` 时补充发现候选。它还会注册精确模型输入解析器；除非逐模型 profile 显式固定 `input`，否则 `llm-pi-ai` 会调用它。任一查询都会刷新陈旧快照；并发查询共用一次刷新，成功后替换持久快照，失败则保留 last-good 数据。可识别的 owner 会选择该提供方的精确动态声明，模型页也会把发现结果中的 `owned_by` 保存在采用的模型行上。模型 ID 以大小写无关方式匹配，让大小写别名归入同一声明集合。owner 不透明、缺失或为网关自定义值时，输入模态要求所有同 id 声明完全一致；声明不一致或 id 未知时保持原样。动态快照不存在该 id 时，才按同样规则回退 pi-ai。端点与逐模型元数据始终优先，更早的解析器优先；路由名、协议名与模型名称模式绝不会被当作能力证据。
+插件会补充发现候选中由端点省略的字段，并为运行时调用注册精确模型输入与容量解析器。任一查询都会刷新陈旧快照；并发查询共用一次刷新，成功后替换持久快照，失败则保留 last-good 数据。可识别的 owner 会选择该提供方的精确动态声明，模型页也会把发现结果中的 `owned_by` 保存在采用的模型行上。当 owner 是本地别名时，配置的完整 `baseURL` 若与唯一一个 `models.dev` 提供方 API 精确一致，也能确定同一身份，无需逐模型映射。模型 ID 以大小写无关方式匹配，让大小写别名归入同一声明集合。没有 owner 或端点匹配时，每个字段都要求所有同 id 声明完全一致；声明不一致或 id 未知时保持原样。动态快照没有覆盖的字段按同样规则回退 pi-ai。端点明确公布的发现字段与更早的 enricher 仍然优先；运行时 catalog 容量会替换已安装或已保存的陈旧能力值，但不改写 settings。路由名、协议名、部分 URL 与模型名称模式绝不会被当作能力证据。
 
 | 配置 | 默认值 | 含义 |
 | --- | --- | --- |
@@ -23,8 +23,8 @@ dsh plugin --profile <custom-profile> add @deepseek-ai/dsh-model-catalog
 
 这个 Bundle 可以独立打包，但依赖未修改 DSH runtime 中不存在的模型元数据扩展点：
 
-- `@deepseek-ai/dsh-llm` 提供有序的 `registerModelDiscoveryEnricher()`、`registerModelInputResolver()` 和 `resolveModelInput()` API；Harness 源码中的所有者实现位于 `packages/llm/llm/src/index.ts`，公开类型位于 `packages/llm/llm/src/types.ts`。
-- `@deepseek-ai/dsh-llm-pi-ai` 会先向 LLM service 查询外部精确模型输入元数据，再使用已安装 catalog 回退；Harness 源码中的所有者适配位于 `packages/llm/llm-pi-ai/src/adapter.ts`。
+- `@deepseek-ai/dsh-llm` 提供有序的模型发现补充，以及精确输入和容量解析 API；Harness 源码中的所有者实现位于 `packages/llm/llm/src/index.ts`，公开类型位于 `packages/llm/llm/src/types.ts`。
+- `@deepseek-ai/dsh-llm-pi-ai` 会先把精确 owner 与端点元数据交给这些解析器，再使用已安装 catalog 回退；Harness 源码中的所有者适配位于 `packages/llm/llm-pi-ai/src/adapter.ts`。
 - Host 模型发现和模型设置页会保留上游 `owned_by` 与可选 `inputModalities`，使网关模型可以匹配正确的 catalog owner。
 
 侧载包只通过这些 API 提供 catalog 数据，不会自行增加 API、推断推理等级支持或改写提供方设置。缺少这些扩展点的 DSH 版本不兼容，必须先升级主程序；扩展点进入 Harness 基线后，catalog 刷新逻辑才可以通过这个 Bundle 独立更新。
@@ -47,7 +47,7 @@ dsh plugin --profile <custom-profile> add @deepseek-ai/dsh-model-catalog
 
 ## 已知限制与暂缓工作
 
-- **刷新由查询触发**：模型发现或运行时精确查询会检查快照是否陈旧；插件不在后台轮询，也不静默改写已有模型行。
-- **不透明 owner 采用保守结果**：`owned_by` 缺失或是网关自定义值时，输入声明必须完全一致，绝不合并提供方特有模态。
+- **刷新由查询触发**：模型发现或运行时精确查询会检查快照是否陈旧；插件不在后台轮询，也不静默改写已有模型行。旧缓存会被标记为一次性过期，使下一次查询获取并持久化端点身份与容量。
+- **不透明 owner 采用保守结果**：没有可识别的 `owned_by` 或精确提供方端点匹配时，每个字段的同 id 声明必须完全一致，绝不合并提供方特有内容。
 - **只有已实现的传输会生效**：catalog 可以声明 `audio`、`video` 或 `pdf`，但 `llm-pi-ai` 仅在能够序列化任意 inline media 的 Google 协议上公开这些模态；其他协议保留 `text/image` 并使用识别回退。
-- **不复制容量**：上下文与输出容量仍由端点或提供方配置决定，因为网关可能采用与上游 owner 不同的限制。
+- **输出能力不是请求默认值**：`limit.output` 会确定提供方模型描述符的容量，但只有提供方 profile 显式配置时才会成为请求的 `maxTokens`。

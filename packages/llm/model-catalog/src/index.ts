@@ -1,6 +1,7 @@
 /**
- * Dynamic model-discovery enrichment backed by models.dev with a persisted
- * last-good snapshot and the installed pi-ai catalog as its offline fallback.
+ * Dynamic model-discovery and capacity enrichment backed by models.dev with a
+ * persisted last-good snapshot and the installed pi-ai catalog as its offline
+ * fallback.
  * Exact provider/model declarations or exact-id shared capabilities are
  * required; route names, wire protocols, and model-name patterns are never
  * capability evidence.
@@ -15,7 +16,7 @@ import type { BuiltinProvider } from '@earendil-works/pi-ai/providers/all'
 import { getBuiltinModels, getBuiltinProviders } from '@earendil-works/pi-ai/providers/all'
 import { defineDomain } from '@deepseek-ai/dsh-storage-domain'
 import type { DomainGlobal } from '@deepseek-ai/dsh-storage-domain'
-import type { ModelModality } from '@deepseek-ai/dsh-llm'
+import type { LlmModelCapacity, ModelModality } from '@deepseek-ai/dsh-llm'
 
 /** Default dynamic catalog endpoint used by Hermes/pi model generation. */
 export const DEFAULT_CATALOG_URL = 'https://models.dev/api.json'
@@ -50,29 +51,52 @@ const modalitySchema = z.enum(['text', 'image', 'audio', 'video', 'pdf'])
 const declarationSchema = z.object({
   provider: z.string().min(1),
   id: z.string().min(1),
-  input: z.array(modalitySchema).min(1),
+  input: z.array(modalitySchema).min(1).optional(),
+  contextWindow: z.number().int().positive().optional(),
+  maxOutputTokens: z.number().int().positive().optional(),
+}).refine(declaration => declaration.input !== undefined
+  || declaration.contextWindow !== undefined
+  || declaration.maxOutputTokens !== undefined, {
+  message: 'catalog declaration must contain supported metadata',
+})
+const providerSchema = z.object({
+  id: z.string().min(1),
+  api: z.string().min(1).optional(),
 })
 const catalogCacheSchema = z.object({
+  format: z.union([z.literal(1), z.literal(2)]).optional(),
   checkedAt: z.number().int().nonnegative(),
+  providers: z.array(providerSchema).optional(),
   declarations: z.array(declarationSchema),
 })
 type CatalogDeclaration = z.infer<typeof declarationSchema>
 type CatalogCache = z.infer<typeof catalogCacheSchema>
+type CatalogProvider = z.infer<typeof providerSchema>
 
 interface CatalogModelRef {
   id: string
   ownedBy?: string
+  baseURL?: string
 }
 
 const catalogDomainSpec = defineDomain({
   name: 'model_catalog_pi_ai',
   version: 0,
-  global: { schema: catalogCacheSchema, initial: { checkedAt: 0, declarations: [] } },
+  global: {
+    schema: catalogCacheSchema,
+    initial: { format: 2 as const, checkedAt: 0, providers: [], declarations: [] },
+  },
   tables: {},
 })
 
 const providerIds = new Set<string>(getBuiltinProviders())
-const ambiguous = Symbol('ambiguous-model-modalities')
+const ambiguous = Symbol('ambiguous-model-metadata')
+
+interface CatalogMetadata extends LlmModelCapacity {
+  input?: readonly ModelModality[]
+}
+
+type CatalogResolution<T> = { covered: false } | { covered: true; value: T | undefined }
 
 /** Whether pi-ai ships a catalog under this exact provider owner. */
 function isBuiltinProvider(owner: string): owner is BuiltinProvider {
@@ -96,29 +120,67 @@ function supportedModalities(value: unknown): ModelModality[] | undefined {
   return input.length === 0 ? undefined : input
 }
 
+/** Normalize one catalog capacity to a positive integer. */
+function supportedCapacity(value: unknown): number | undefined {
+  return Number.isInteger(value) && (value as number) > 0 ? value as number : undefined
+}
+
 function sameModelId(left: string, right: string): boolean {
   return left.toLowerCase() === right.toLowerCase()
 }
 
+/** Normalize an endpoint for exact provider-API comparison. */
+function normalizedEndpoint(value: string | undefined): string | undefined {
+  if (value === undefined) return undefined
+  try {
+    const url = new URL(value)
+    url.hash = ''
+    url.pathname = url.pathname.replace(/\/+$/, '')
+    return url.href.replace(/\/$/, '')
+  } catch {
+    return undefined
+  }
+}
+
 /** Parse exact provider/model declarations from one models.dev document. */
-function parseCatalog(value: unknown): CatalogDeclaration[] {
+function parseCatalog(value: unknown): {
+  providers: CatalogProvider[]
+  declarations: CatalogDeclaration[]
+} {
   if (typeof value !== 'object' || value === null || Array.isArray(value)) {
     throw new Error('dynamic model catalog must be a provider object')
   }
+  const providers: CatalogProvider[] = []
   const declarations: CatalogDeclaration[] = []
   for (const [provider, rawProvider] of Object.entries(value)) {
     if (typeof rawProvider !== 'object' || rawProvider === null || Array.isArray(rawProvider)) continue
+    const api = typeof (rawProvider as { api?: unknown }).api === 'string'
+      && (rawProvider as { api: string }).api.length > 0
+      ? (rawProvider as { api: string }).api
+      : undefined
+    providers.push({ id: provider, ...api === undefined ? {} : { api } })
     const models = (rawProvider as { models?: unknown }).models
     if (typeof models !== 'object' || models === null || Array.isArray(models)) continue
     for (const [id, rawModel] of Object.entries(models)) {
       if (typeof rawModel !== 'object' || rawModel === null || Array.isArray(rawModel)) continue
-      const modalities = supportedModalities(
+      const input = supportedModalities(
         (rawModel as { modalities?: { input?: unknown } }).modalities?.input,
       )
-      if (modalities !== undefined) declarations.push({ provider, id, input: modalities })
+      const limit = (rawModel as { limit?: { context?: unknown; output?: unknown } }).limit
+      const contextWindow = supportedCapacity(limit?.context)
+      const maxOutputTokens = supportedCapacity(limit?.output)
+      if (input !== undefined || contextWindow !== undefined || maxOutputTokens !== undefined) {
+        declarations.push({
+          provider,
+          id,
+          ...input === undefined ? {} : { input },
+          ...contextWindow === undefined ? {} : { contextWindow },
+          ...maxOutputTokens === undefined ? {} : { maxOutputTokens },
+        })
+      }
     }
   }
-  return declarations
+  return { providers, declarations }
 }
 
 /** Read a response under the configured actual-byte ceiling. */
@@ -157,7 +219,10 @@ class DynamicCatalog {
     private readonly global: DomainGlobal<CatalogCache>,
     private readonly config: Required<Config>,
   ) {
-    this.cache = global.get()
+    const persisted = global.get()
+    this.cache = persisted.format === 2
+      ? persisted
+      : { ...persisted, checkedAt: 0, providers: persisted.providers ?? [] }
   }
 
   /** Refresh stale metadata once and retain the persisted snapshot on failure. */
@@ -173,18 +238,62 @@ class DynamicCatalog {
     signal?.throwIfAborted()
   }
 
-  /** Resolve one discovered model from dynamic declarations, then pi-ai. */
-  modalities(model: CatalogModelRef): readonly ModelModality[] | undefined {
+  /** Resolve supported metadata from dynamic declarations, then pi-ai. */
+  metadata(model: CatalogModelRef): CatalogMetadata {
     const remote = this.cache.declarations.filter(candidate => sameModelId(candidate.id, model.id))
-    if (remote.length > 0) return this.resolveDeclarations(remote, model.ownedBy)
-    if (model.ownedBy !== undefined && isBuiltinProvider(model.ownedBy)) {
-      return getBuiltinModels(model.ownedBy).find(candidate => sameModelId(candidate.id, model.id))?.input
+    const owners = this.exactOwners(model, remote)
+    const input = this.resolveField(remote, owners, candidate => candidate.input, sameModalities)
+    const contextWindow = this.resolveField(
+      remote,
+      owners,
+      candidate => candidate.contextWindow,
+      (left, right) => left === right,
+    )
+    const maxOutputTokens = this.resolveField(
+      remote,
+      owners,
+      candidate => candidate.maxOutputTokens,
+      (left, right) => left === right,
+    )
+    const builtin = this.builtin(model, owners)
+    const resolvedInput = input.covered ? input.value : builtin.input
+    const resolvedContextWindow = contextWindow.covered ? contextWindow.value : builtin.contextWindow
+    const resolvedMaxOutputTokens = maxOutputTokens.covered ? maxOutputTokens.value : builtin.maxOutputTokens
+    return {
+      ...resolvedInput === undefined ? {} : { input: resolvedInput },
+      ...resolvedContextWindow === undefined ? {} : { contextWindow: resolvedContextWindow },
+      ...resolvedMaxOutputTokens === undefined ? {} : { maxOutputTokens: resolvedMaxOutputTokens },
     }
-    return this.consensus(getBuiltinProviders().flatMap(provider =>
+  }
+
+  private builtin(model: CatalogModelRef, owners: readonly string[]): CatalogMetadata {
+    const owner = owners.length === 1 ? owners[0] : model.ownedBy
+    if (owner !== undefined && isBuiltinProvider(owner)) {
+      const hit = getBuiltinModels(owner).find(candidate => sameModelId(candidate.id, model.id))
+      return hit === undefined ? {} : {
+        input: hit.input,
+        contextWindow: hit.contextWindow,
+        maxOutputTokens: hit.maxTokens,
+      }
+    }
+    const candidates = getBuiltinProviders().flatMap(provider =>
       getBuiltinModels(provider)
-        .filter(candidate => sameModelId(candidate.id, model.id))
-        .map(candidate => candidate.input),
-    ))
+        .filter(candidate => sameModelId(candidate.id, model.id)),
+    )
+    const input = this.consensus(candidates.map(candidate => candidate.input), sameModalities)
+    const contextWindow = this.consensus(
+      candidates.map(candidate => candidate.contextWindow),
+      (left, right) => left === right,
+    )
+    const maxOutputTokens = this.consensus(
+      candidates.map(candidate => candidate.maxTokens),
+      (left, right) => left === right,
+    )
+    return {
+      ...input === undefined ? {} : { input },
+      ...contextWindow === undefined ? {} : { contextWindow },
+      ...maxOutputTokens === undefined ? {} : { maxOutputTokens },
+    }
   }
 
   private async fetchAndStore(): Promise<void> {
@@ -192,31 +301,57 @@ class DynamicCatalog {
       signal: AbortSignal.timeout(this.config.requestTimeoutMs),
       headers: { accept: 'application/json' },
     })
-    const declarations = parseCatalog(await readBoundedJson(response, this.config.maxResponseBytes))
-    const cache = { checkedAt: Date.now(), declarations }
+    const { providers, declarations } = parseCatalog(
+      await readBoundedJson(response, this.config.maxResponseBytes),
+    )
+    const cache = { format: 2 as const, checkedAt: Date.now(), providers, declarations }
     await this.global.set(cache)
     this.cache = cache
   }
 
-  private resolveDeclarations(
+  private resolveField<T>(
     declarations: readonly CatalogDeclaration[],
-    owner: string | undefined,
-  ): readonly ModelModality[] | undefined {
-    if (owner !== undefined) {
-      const owned = declarations.filter(candidate => candidate.provider === owner)
-      if (owned.length > 0) return this.consensus(owned.map(candidate => candidate.input))
+    owners: readonly string[],
+    select: (declaration: CatalogDeclaration) => T | undefined,
+    equals: (left: T, right: T) => boolean,
+  ): CatalogResolution<T> {
+    if (owners.length > 0) {
+      const ownerSet = new Set(owners)
+      const owned = declarations.filter(candidate => ownerSet.has(candidate.provider))
+      const values = owned.map(select).filter((value): value is T => value !== undefined)
+      if (owned.length > 0) {
+        return values.length === 0
+          ? { covered: false }
+          : { covered: true, value: this.consensus(values, equals) }
+      }
     }
-    return this.consensus(declarations.map(candidate => candidate.input))
+    const values = declarations.map(select).filter((value): value is T => value !== undefined)
+    return values.length === 0
+      ? { covered: false }
+      : { covered: true, value: this.consensus(values, equals) }
   }
 
-  private consensus(
-    candidates: readonly (readonly ModelModality[])[],
-  ): readonly ModelModality[] | undefined {
-    let current: readonly ModelModality[] | typeof ambiguous | undefined
+  private exactOwners(
+    model: CatalogModelRef,
+    declarations: readonly CatalogDeclaration[],
+  ): string[] {
+    if (model.ownedBy !== undefined
+      && declarations.some(candidate => candidate.provider === model.ownedBy)) {
+      return [model.ownedBy]
+    }
+    const endpoint = normalizedEndpoint(model.baseURL)
+    if (endpoint === undefined) return []
+    return (this.cache.providers ?? [])
+      .filter(provider => normalizedEndpoint(provider.api) === endpoint)
+      .map(provider => provider.id)
+  }
+
+  private consensus<T>(candidates: readonly T[], equals: (left: T, right: T) => boolean): T | undefined {
+    let current: T | typeof ambiguous | undefined
     for (const candidate of candidates) {
       if (current === ambiguous) break
       if (current === undefined) current = candidate
-      else if (!sameModalities(current, candidate)) current = ambiguous
+      else if (!equals(current, candidate)) current = ambiguous
     }
     return current === ambiguous ? undefined : current
   }
@@ -227,7 +362,7 @@ export const name = 'model-catalog'
 /** Services required by dynamic enrichment and durable last-good storage. */
 export const inject = ['llm', 'storageDomain']
 
-/** Register dynamic exact-catalog modality enrichment. */
+/** Register dynamic exact-catalog modality and capacity enrichment. */
 export async function apply(ctx: Context, config: Config): Promise<void> {
   const domain = await ctx.storageDomain.open(catalogDomainSpec)
   ctx.effect(() => () => domain.close(), 'modelCatalogPiAi.domainClose')
@@ -240,13 +375,42 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
   ctx.llm.registerModelDiscoveryEnricher(async ({ request, models }) => {
     await catalog.refresh(request.signal)
     return models.flatMap((model) => {
-      if (model.inputModalities !== undefined) return []
-      const modalities = catalog.modalities(model)
-      return modalities === undefined ? [] : [{ id: model.id, inputModalities: [...modalities] }]
+      const metadata = catalog.metadata({
+        ...model,
+        ...request.baseURL === undefined ? {} : { baseURL: request.baseURL },
+      })
+      const patch = {
+        id: model.id,
+        ...model.contextWindow === undefined && metadata.contextWindow !== undefined
+          ? { contextWindow: metadata.contextWindow } : {},
+        ...model.maxTokens === undefined && metadata.maxOutputTokens !== undefined
+          ? { maxTokens: metadata.maxOutputTokens } : {},
+        ...model.inputModalities === undefined && metadata.input !== undefined
+          ? { inputModalities: [...metadata.input] } : {},
+      }
+      return Object.keys(patch).length === 1 ? [] : [patch]
     })
   })
-  ctx.llm.registerModelInputResolver(async ({ provider, model, ownedBy, signal }) => {
+  ctx.llm.registerModelInputResolver(async ({ provider, model, ownedBy, baseURL, signal }) => {
     await catalog.refresh(signal)
-    return catalog.modalities({ id: model, ownedBy: ownedBy ?? provider })
+    return catalog.metadata({
+      id: model,
+      ownedBy: ownedBy ?? provider,
+      ...baseURL === undefined ? {} : { baseURL },
+    }).input
+  })
+  ctx.llm.registerModelCapacityResolver(async ({ provider, model, ownedBy, baseURL, signal }) => {
+    await catalog.refresh(signal)
+    const { contextWindow, maxOutputTokens } = catalog.metadata({
+      id: model,
+      ownedBy: ownedBy ?? provider,
+      ...baseURL === undefined ? {} : { baseURL },
+    })
+    return contextWindow === undefined && maxOutputTokens === undefined
+      ? undefined
+      : {
+          ...contextWindow === undefined ? {} : { contextWindow },
+          ...maxOutputTokens === undefined ? {} : { maxOutputTokens },
+        }
   })
 }

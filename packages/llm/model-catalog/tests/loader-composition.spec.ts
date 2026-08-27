@@ -93,7 +93,7 @@ describe('model-catalog real Loader composition', () => {
     await ctx.loader.await()
 
     await expect(ctx.llm.discoverModels('llm-test', { provider: 'gateway' })).resolves.toEqual([
-      { id: 'gpt-5.6-luna', ownedBy: 'custom', inputModalities: ['text', 'image'] },
+      { id: 'gpt-5.6-luna', ownedBy: 'custom', maxTokens: 128_000, inputModalities: ['text', 'image'] },
       { id: 'text-model', ownedBy: 'openai', inputModalities: ['text'] },
     ])
   })
@@ -129,6 +129,14 @@ describe('model-catalog real Loader composition', () => {
       '      google:',
       '        models:',
       '          - id: gemini-3.7-flash',
+      '      zai-coding-cn:',
+      '        api: openai-completions',
+      '        baseURL: https://open.bigmodel.cn/api/coding/paas/v4',
+      '        models:',
+      '          - id: glm-5.3-flash',
+      '            ownedBy: zai-coding-cn',
+      '            contextWindow: 131072',
+      '            maxTokens: 98304',
       '- id: model-catalog',
       "  name: '@deepseek-ai/dsh-model-catalog'",
       '  config:',
@@ -140,6 +148,24 @@ describe('model-catalog real Loader composition', () => {
         models: {
           'gemini-3.7-flash': { modalities: { input: ['text', 'image', 'audio', 'video', 'pdf'] } },
           'forced-text': { modalities: { input: ['text', 'image', 'audio', 'video', 'pdf'] } },
+        },
+      },
+      zai: {
+        api: 'https://api.z.ai/api/paas/v4',
+        models: {
+          'glm-5.3-flash': {
+            modalities: { input: ['text', 'image', 'video', 'pdf'] },
+            limit: { context: 1_048_576, output: 131_072 },
+          },
+        },
+      },
+      'zhipuai-coding-plan': {
+        api: 'https://open.bigmodel.cn/api/coding/paas/v4',
+        models: {
+          'glm-5.3-flash': {
+            modalities: { input: ['text', 'image', 'video', 'pdf'] },
+            limit: { context: 1_000_000, output: 131_072 },
+          },
         },
       },
     })))))
@@ -180,6 +206,11 @@ describe('model-catalog real Loader composition', () => {
     })
     await expect(ctx.llm.resolveModelInfo('google', 'gemini-3.7-flash')).resolves.toMatchObject({
       inputModalities: ['text', 'image', 'audio', 'video', 'pdf'],
+    })
+    await expect(ctx.llm.resolveModelInfo('zai-coding-cn', 'glm-5.3-flash')).resolves.toMatchObject({
+      context: { contextWindow: 1_000_000 },
+      defaultMaxTokens: 98_304,
+      inputModalities: ['text', 'image'],
     })
   })
 })

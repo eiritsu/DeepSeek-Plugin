@@ -2,7 +2,7 @@
   "id": "@deepseek-ai/dsh-model-catalog",
   "displayName": "dsh-model-catalog",
   "category": "models",
-  "version": "0.1.1-rc.2",
+  "version": "0.1.1-rc.3",
   "sourcePackages": [
     "packages/llm/model-catalog"
   ],
@@ -11,7 +11,9 @@
   "requiredHarnessCapabilities": [
     "llm.model-discovery-enricher",
     "llm.model-input-resolver",
-    "llm-pi-ai.external-input-resolution"
+    "llm.model-capacity-resolver",
+    "llm-pi-ai.external-input-resolution",
+    "llm-pi-ai.external-capacity-resolution"
   ],
   "defaultInstalled": true
 }
