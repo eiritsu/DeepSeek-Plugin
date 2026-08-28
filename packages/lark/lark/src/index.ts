@@ -12,7 +12,7 @@ import { settingsNamespace, type SettingsScope } from '@deepseek-ai/dsh-settings
 import type { SubprocessHandle } from '@deepseek-ai/dsh-subprocess'
 import { defineTool, type PreToolDecision } from '@deepseek-ai/dsh-tools'
 import { Remote, TypertRemoteService } from '@deepseek-ai/dsh-typert-protocol'
-import { authenticatedUserOpenId } from './auth-status.ts'
+import { authenticatedUserOpenId, missingUserAuthorizationScopes } from './auth-status.ts'
 import {
   commandHelpArguments,
   helpDeclaresReadOnly,
@@ -156,6 +156,8 @@ export interface LarkManagementStatus {
   readonly bot: LarkIdentityStatus
   /** User OAuth identity state. */
   readonly user: LarkIdentityStatus
+  /** Required scopes absent from the current user OAuth token. */
+  readonly userAuthorizationMissingScopes: readonly string[]
   /** Private-chat transport state. */
   readonly conversation: LarkConversationStatus
   /** Permission rows in product order. */
@@ -301,6 +303,7 @@ export default class LarkManagementGateway extends TypertRemoteService {
         cliAvailable: false,
         bot: { status: 'missing', available: false },
         user: { status: 'missing', available: false },
+        userAuthorizationMissingScopes: requestedUserScopes(),
         capabilities: this.capabilityStatus(undefined, undefined),
       }
     }
@@ -330,6 +333,7 @@ export default class LarkManagementGateway extends TypertRemoteService {
       cliAvailable: authResult.status === 'fulfilled',
       bot: identity(identities?.bot),
       user: identity(identities?.user),
+      userAuthorizationMissingScopes: missingUserAuthorizationScopes(auth, requestedUserScopes()),
       capabilities: this.capabilityStatus(enabledScopes?.tenant, enabledScopes?.user),
       ...diagnostics.length === 0 ? {} : { diagnostic: diagnostics.join(' ') },
     }

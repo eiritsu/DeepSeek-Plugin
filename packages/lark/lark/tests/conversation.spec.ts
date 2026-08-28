@@ -2,7 +2,7 @@ import { Buffer } from 'node:buffer'
 import { createHash } from 'node:crypto'
 import type { Context } from '@deepseek-ai/cordis'
 import type { Agent, AgentHandle } from '@deepseek-ai/dsh-agent'
-import { AttachmentId, type FileAttachmentRef, type ImageAttachmentRef } from '@deepseek-ai/dsh-attachment'
+import { AttachmentId, type ImageAttachmentRef } from '@deepseek-ai/dsh-attachment'
 import { createAssistantMessage, type UserMessage } from '@deepseek-ai/dsh-llm'
 import { SessionId } from '@deepseek-ai/dsh-session'
 import type { LarkChannel, NormalizedMessage, SendInput } from '@larksuite/channel'
@@ -16,6 +16,7 @@ interface FakeEvent {
 
 interface FakeSession {
   readonly id: SessionId
+  readonly header: { readonly cwd?: string }
   readonly events: FakeEvent[]
 }
 
@@ -28,13 +29,6 @@ const IMAGE_REF: ImageAttachmentRef = {
   width: 1,
   height: 1,
   name: 'input.png',
-}
-
-const FILE_REF: FileAttachmentRef = {
-  attachmentId: AttachmentId('file-attachment'),
-  mediaType: 'text/plain',
-  bytes: 4,
-  name: 'answer.txt',
 }
 
 function inbound(overrides: Partial<NormalizedMessage> = {}): NormalizedMessage {
@@ -87,6 +81,7 @@ function harness(options: {
   workspaceExists?: boolean
   attachError?: Error
   live?: boolean
+  sessionCwd?: string
 } = {}): {
   readonly ctx: Context
   readonly followups: UserMessage[]
@@ -95,11 +90,11 @@ function harness(options: {
   readonly setupTimeZones: string[]
   readonly resumed: SessionId[]
   readonly attached: SessionId[]
+  readonly workspaceResolves: string[]
   readonly workspaceCreates: string[]
   readonly disposed: ReturnType<typeof vi.fn>
   readonly scopedDisposed: ReturnType<typeof vi.fn>
   readonly savedImages: ReturnType<typeof vi.fn>
-  readonly savedFiles: ReturnType<typeof vi.fn>
 } {
   const listeners = new Set<SessionListener>()
   const agentCreatedListeners = new Set<(payload: { agent: Agent }) => void>()
@@ -111,11 +106,11 @@ function harness(options: {
   const setupTimeZones: string[] = []
   const resumed: SessionId[] = []
   const attached: SessionId[] = []
+  const workspaceResolves: string[] = []
   const workspaceCreates: string[] = []
   const disposed = vi.fn(async () => {})
   const scopedDisposed = vi.fn(async () => {})
   const savedImages = vi.fn(async () => [IMAGE_REF])
-  const savedFiles = vi.fn(async () => [FILE_REF])
   const agentCtx = {
     plugin: vi.fn(async (_plugin: unknown, config: { timeZone: string }) => {
       setupTimeZones.push(config.timeZone)
@@ -133,8 +128,8 @@ function harness(options: {
     session.events.push(event)
     for (const listener of listeners) listener(session, event)
   }
-  const makeHandle = (sessionId: SessionId): AgentHandle => {
-    const session: FakeSession = { id: sessionId, events: [] }
+  const makeHandle = (sessionId: SessionId, cwd = options.sessionCwd ?? '/workspace'): AgentHandle => {
+    const session: FakeSession = { id: sessionId, header: { cwd }, events: [] }
     const agent = {
       id: sessionId,
       ctx: agentCtx,
@@ -146,7 +141,6 @@ function harness(options: {
           ? [
               { type: 'text' as const, text: '已完成' },
               { type: 'image' as const, attachment: IMAGE_REF },
-              { type: 'file' as const, attachment: FILE_REF },
             ]
           : [{ type: 'text' as const, text: '收到' }]
         emit(session, {
@@ -217,7 +211,7 @@ function harness(options: {
         created.push(sessionId)
         createdCwds.push(meta?.cwd)
         await setup?.(agentCtx)
-        return makeHandle(sessionId)
+        return makeHandle(sessionId, meta?.cwd)
       }),
       resume: vi.fn(async ({ resumeSessionId, setup }: {
         resumeSessionId: SessionId
@@ -236,14 +230,15 @@ function harness(options: {
     },
     attachments: {
       saveImages: savedImages,
-      saveFiles: savedFiles,
       recognizeImage: vi.fn(async () => ({ text: '图片内容' })),
       recognizeFile: vi.fn(async () => ({ text: '文件内容' })),
       readImage: vi.fn(async () => ({ ref: IMAGE_REF, data: new Uint8Array([1, 2, 3]) })),
-      readFile: vi.fn(async () => ({ ref: FILE_REF, data: new Uint8Array([4, 5, 6, 7]) })),
     },
     workspaceRegistry: {
-      resolveByPath: vi.fn(async () => options.workspaceExists === false ? undefined : workspace),
+      resolveByPath: vi.fn(async (path: string) => {
+        workspaceResolves.push(path)
+        return options.workspaceExists === false ? undefined : workspace
+      }),
       create: vi.fn(async (path: string) => {
         workspaceCreates.push(path)
         return workspace
@@ -258,11 +253,11 @@ function harness(options: {
     setupTimeZones,
     resumed,
     attached,
+    workspaceResolves,
     workspaceCreates,
     disposed,
     scopedDisposed,
     savedImages,
-    savedFiles,
   }
 }
 
@@ -301,13 +296,13 @@ describe('LarkConversationBridge', () => {
       messageId: 'om_message',
       senderId: 'ou_allowed',
     })
-    expect(channel.replies).toEqual([{ markdown: '收到' }])
+    expect(channel.replies).toEqual([{ text: '收到' }])
     await bridge.dispose()
     expect(channel.disconnect).toHaveBeenCalledOnce()
     expect(runtime.disposed).toHaveBeenCalledOnce()
   })
 
-  it('stores inbound images and files and returns attachment response blocks', async () => {
+  it('stores inbound images, recognizes transient files, and returns supported response blocks', async () => {
     const runtime = harness({ responseWithAttachments: true })
     const channel = new FakeChannel()
     const bridge = new LarkConversationBridge(runtime.ctx, channel as unknown as LarkChannel, {
@@ -328,24 +323,20 @@ describe('LarkConversationBridge', () => {
     expect(runtime.savedImages).toHaveBeenCalledWith([
       expect.objectContaining({ mediaType: 'image/png', name: 'input.png' }),
     ])
-    expect(runtime.savedFiles).toHaveBeenCalledWith([
-      expect.objectContaining({ mediaType: 'text/plain', name: 'input.txt' }),
-    ])
     expect(runtime.followups[0]?.content).toEqual([
       { type: 'text', text: '请处理附件' },
-      { type: 'image', attachment: IMAGE_REF, recognizedText: '图片内容' },
-      { type: 'file', attachment: FILE_REF, recognizedText: '文件内容' },
+      { type: 'image', attachment: IMAGE_REF },
+      { type: 'text', text: 'Attached file "input.txt" content:\n文件内容' },
     ])
     expect(channel.replies).toEqual([
-      { markdown: '已完成' },
+      { text: '已完成' },
       { image: { source: Buffer.from([1, 2, 3]) } },
-      { file: { source: Buffer.from([4, 5, 6, 7]), fileName: 'answer.txt' } },
     ])
     await bridge.dispose()
   })
 
   it('resumes a persisted chat and rejects groups or other senders', async () => {
-    const runtime = harness({ persisted: true, workspaceExists: false })
+    const runtime = harness({ persisted: true, workspaceExists: false, sessionCwd: '/persisted-workspace' })
     const channel = new FakeChannel()
     const bridge = new LarkConversationBridge(runtime.ctx, channel as unknown as LarkChannel, {
       appId: 'cli_app',
@@ -361,7 +352,8 @@ describe('LarkConversationBridge', () => {
 
     expect(runtime.created).toEqual([])
     expect(runtime.resumed).toEqual([larkSessionId('cli_app', 'oc_chat')])
-    expect(runtime.workspaceCreates).toEqual(['/workspace'])
+    expect(runtime.workspaceResolves).toEqual(['/persisted-workspace'])
+    expect(runtime.workspaceCreates).toEqual(['/persisted-workspace'])
     expect(runtime.setupTimeZones).toEqual(['Asia/Shanghai'])
     expect(runtime.attached).toEqual([larkSessionId('cli_app', 'oc_chat')])
     expect(runtime.followups).toHaveLength(1)
@@ -390,7 +382,7 @@ describe('LarkConversationBridge', () => {
   })
 
   it('configures a chat Agent that another client resumed first', async () => {
-    const runtime = harness({ live: true })
+    const runtime = harness({ live: true, sessionCwd: '/live-workspace' })
     const channel = new FakeChannel()
     const bridge = new LarkConversationBridge(runtime.ctx, channel as unknown as LarkChannel, {
       appId: 'cli_app',
@@ -402,6 +394,7 @@ describe('LarkConversationBridge', () => {
     await bridge.connect()
 
     expect(runtime.setupTimeZones).toEqual(['Asia/Shanghai'])
+    expect(runtime.workspaceResolves).toEqual(['/live-workspace'])
     expect(runtime.attached).toEqual([larkSessionId('cli_app', 'oc_chat')])
 
     await channel.emitMessage(inbound())

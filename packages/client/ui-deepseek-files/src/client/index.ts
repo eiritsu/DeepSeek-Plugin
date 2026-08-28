@@ -1,6 +1,5 @@
 /** Deepseek-Files Settings section registration. */
 
-import type { ConnectionHandle } from '@deepseek-ai/dsh-api-remotes/client'
 import type {} from '@deepseek-ai/dsh-api-remotes/types'
 import type {} from '@deepseek-ai/dsh-client-locale/client'
 import type { ClientContext } from '@deepseek-ai/dsh-client-runtime/client'
@@ -23,13 +22,12 @@ declare module '@deepseek-ai/dsh-client-ui-slots' {
 }
 
 /** Required browser services. */
-export const inject = ['slots', 'locale', 'connection', 'remote', 'settingsScope']
+export const inject = ['slots', 'locale', 'remote', 'remote.credentials', 'settingsScope']
 
 /** Register the Deepseek-Files Settings page. */
 export function apply(ctx: ClientContext): void {
-  const connection = ctx.get('connection') as ConnectionHandle
   const scope = ctx.settingsScope.bind<DeepseekFilesSettings>({ namespace: 'file-recognizer-office' })
-  const controller = new DeepseekFilesSettingsController(scope, connection.api)
+  const controller = new DeepseekFilesSettingsController(scope, ctx.remote)
   ctx.effect(() => ctx.locale.register('settings.deepseekFiles', { zh, en }), 'ui-deepseek-files: dictionaries')
   ctx.effect(() => {
     const dispose = ctx.remote.$on('credentials/reference-updated', (ref) => { controller.refreshCredential(ref) })

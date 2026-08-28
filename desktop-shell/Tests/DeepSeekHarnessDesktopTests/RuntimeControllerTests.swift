@@ -64,7 +64,7 @@ import Testing
 
 @Test func startupFailureIdentifiesTheRootSideloadedPackage() {
   let state = StartupState(progress: { _ in }, log: { _ in })
-  state.consume(Data("failed to import loader entry ui-lark (@deepseek-ai/dsh-lark/ui)\n".utf8), isError: true)
+  state.consume(Data("failed to import loader entry lark (@deepseek-ai/dsh-lark)\n".utf8), isError: true)
   state.terminated(status: 1)
 
   let failure = state.outcome().1 as? RuntimeStartupFailure

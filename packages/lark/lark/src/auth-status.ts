@@ -19,3 +19,23 @@ export function authenticatedUserOpenId(status: unknown): string | undefined {
   if (user?.available !== true || user.verified === false) return undefined
   return typeof user.openId === 'string' && user.openId.length > 0 ? user.openId : undefined
 }
+
+/**
+ * Compare an official CLI user identity with the scopes required by this plugin.
+ *
+ * @param status Parsed `lark-cli auth status --json` output.
+ * @param requiredScopes User scopes requested by the current plugin version.
+ * @returns Required scopes absent from the current user token.
+ */
+export function missingUserAuthorizationScopes(
+  status: unknown,
+  requiredScopes: readonly string[],
+): string[] {
+  const auth = record(status)
+  const identities = record(auth?.identities)
+  const user = record(identities?.user)
+  const required = [...new Set(requiredScopes)]
+  if (user?.available !== true || user.verified === false || typeof user.scope !== 'string') return required
+  const granted = new Set(user.scope.split(/\s+/u).filter(scope => scope.length > 0))
+  return required.filter(scope => !granted.has(scope))
+}

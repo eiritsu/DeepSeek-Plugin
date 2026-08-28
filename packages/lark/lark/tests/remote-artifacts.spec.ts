@@ -40,6 +40,7 @@ describe('Lark generated Remote artifacts', () => {
       cliAvailable: true,
       bot: { status: 'ready', available: true },
       user: { status: 'ready', available: true },
+      userAuthorizationMissingScopes: [],
       conversation: { status: 'waiting', diagnostic: 'authorization required' },
       capabilities: [],
       permissionTemplate: '{}',
@@ -53,9 +54,20 @@ describe('Lark generated Remote artifacts', () => {
     expect(component).not.toContain('permissionTemplate}')
   })
 
-  it('assembles the browser bundle under the side-loaded package subpath', () => {
+  it('assembles a root browser face discoverable beside the Host face', () => {
+    const root = resolve(import.meta.dirname, '..')
+    const manifest = JSON.parse(readFileSync(resolve(root, 'package.json'), 'utf8')) as {
+      dsh: { client?: { platform?: string } }
+      exports: Record<string, unknown>
+    }
+    const patch = readFileSync(resolve(root, 'cordis.patch.yml'), 'utf8')
     const client = readFileSync(resolve(import.meta.dirname, '../lib/client.js'), 'utf8')
-    expect(client).toContain('id: "@deepseek-ai/dsh-lark/ui"')
+    expect(manifest.dsh.client?.platform).toBe('web')
+    expect(manifest.exports).toHaveProperty('./client')
+    expect(patch).toContain("name: '@deepseek-ai/dsh-lark'")
+    expect(patch).not.toContain('@deepseek-ai/dsh-lark/ui')
+    expect(client).toContain('id: "@deepseek-ai/dsh-lark"')
+    expect(client).not.toContain('@deepseek-ai/dsh-lark/ui')
     expect(client).not.toContain('@deepseek-ai/dsh-client-ui-lark')
   })
 

@@ -205,7 +205,7 @@ describe('model-catalog real Loader composition', () => {
       inputModalities: ['text'],
     })
     await expect(ctx.llm.resolveModelInfo('google', 'gemini-3.7-flash')).resolves.toMatchObject({
-      inputModalities: ['text', 'image', 'audio', 'video', 'pdf'],
+      inputModalities: ['text', 'image'],
     })
     await expect(ctx.llm.resolveModelInfo('zai-coding-cn', 'glm-5.3-flash')).resolves.toMatchObject({
       context: { contextWindow: 1_000_000 },

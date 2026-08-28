@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { authenticatedUserOpenId } from '../src/auth-status.ts'
+import { authenticatedUserOpenId, missingUserAuthorizationScopes } from '../src/auth-status.ts'
 
 describe('authenticatedUserOpenId', () => {
   it('reads an available verified user identity', () => {
@@ -26,5 +26,27 @@ describe('authenticatedUserOpenId', () => {
     { identities: { user: { available: true, verified: true, openId: '' } } },
   ])('rejects an unusable identity %#', (status) => {
     expect(authenticatedUserOpenId(status)).toBeUndefined()
+  })
+})
+
+describe('missingUserAuthorizationScopes', () => {
+  it('reports only required scopes absent from the current user token', () => {
+    expect(missingUserAuthorizationScopes({
+      identities: {
+        user: {
+          available: true,
+          verified: true,
+          scope: 'im:message calendar:calendar offline_access',
+        },
+      },
+    }, ['calendar:calendar', 'im:message', 'im:message.send_as_user']))
+      .toEqual(['im:message.send_as_user'])
+  })
+
+  it('requires the complete set when no usable scoped user identity exists', () => {
+    expect(missingUserAuthorizationScopes({
+      identities: { user: { available: false } },
+    }, ['im:message', 'im:message', 'im:message.send_as_user']))
+      .toEqual(['im:message', 'im:message.send_as_user'])
   })
 })

@@ -1,5 +1,3 @@
 - insert:
     - id: lark
       name: '@deepseek-ai/dsh-lark'
-    - id: ui-lark
-      name: '@deepseek-ai/dsh-lark/ui'

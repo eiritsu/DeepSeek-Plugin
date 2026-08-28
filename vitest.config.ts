@@ -14,6 +14,7 @@ export default defineConfig({
       { find: '@deepseek-ai/dsh-client-locale/client', replacement: resolve(harness, 'packages/client/locale/src/client/index.ts') },
       { find: '@deepseek-ai/dsh-client-runtime/client', replacement: resolve(harness, 'packages/client/runtime/src/client/index.ts') },
       { find: '@deepseek-ai/dsh-client-ui-layout/client', replacement: resolve(harness, 'packages/client/ui-layout/src/client/index.ts') },
+      { find: '@deepseek-ai/dsh-client-ui-renderer/client', replacement: resolve(harness, 'packages/client/ui-renderer/src/client/index.ts') },
       { find: '@deepseek-ai/dsh-client-ui-settings/client', replacement: resolve(harness, 'packages/client/ui-settings/src/client/index.ts') },
       { find: '@deepseek-ai/dsh-client-ui-sidebar/client', replacement: resolve(harness, 'packages/client/ui-sidebar/src/client/index.ts') },
       { find: '@deepseek-ai/dsh-client-ui-slots', replacement: resolve(harness, 'packages/client/ui-slots/src/index.ts') },

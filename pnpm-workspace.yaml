@@ -19,6 +19,7 @@ overrides:
   '@deepseek-ai/dsh-client-runtime': 'link:../DeepSeek Harness/packages/client/runtime'
   '@deepseek-ai/dsh-client-ui-layout': 'link:../DeepSeek Harness/packages/client/ui-layout'
   '@deepseek-ai/dsh-client-ui-primitives': 'link:../DeepSeek Harness/packages/client/ui-primitives'
+  '@deepseek-ai/dsh-client-ui-renderer': 'link:../DeepSeek Harness/packages/client/ui-renderer'
   '@deepseek-ai/dsh-client-ui-settings': 'link:../DeepSeek Harness/packages/client/ui-settings'
   '@deepseek-ai/dsh-client-ui-sidebar': 'link:../DeepSeek Harness/packages/client/ui-sidebar'
   '@deepseek-ai/dsh-client-ui-slots': 'link:../DeepSeek Harness/packages/client/ui-slots'

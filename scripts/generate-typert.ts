@@ -43,6 +43,7 @@ const managementStatus = z.object({
   cliAvailable: z.boolean().readonly(),
   bot: identityStatus,
   user: identityStatus,
+  userAuthorizationMissingScopes: z.array(z.string()).readonly(),
   conversation: conversationStatus,
   capabilities: z.array(capabilityStatus).readonly(),
   permissionTemplate: z.string().readonly(),

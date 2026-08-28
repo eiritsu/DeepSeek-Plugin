@@ -3,7 +3,7 @@
 import { Buffer } from 'node:buffer'
 import type { Context } from '@deepseek-ai/cordis'
 import z from '@deepseek-ai/schemastery'
-import type { AttachmentRef, FileRecognizer } from '@deepseek-ai/dsh-attachment'
+import type { FileRecognitionInput, FileRecognizer } from '@deepseek-ai/dsh-attachment'
 import { credentialRef } from '@deepseek-ai/dsh-credentials'
 import { installSettingsSection, settingsNamespace } from '@deepseek-ai/dsh-settings'
 import { parseOfficeAsync } from 'officeparser'
@@ -101,8 +101,8 @@ function validateConfig(config: Config): void {
   }
 }
 
-function extension(ref: AttachmentRef): string | undefined {
-  const name = ref.name
+function extension(file: FileRecognitionInput): string | undefined {
+  const name = file.name
   if (name === undefined) return undefined
   const index = name.lastIndexOf('.')
   return index < 0 ? undefined : name.slice(index + 1).toLowerCase()
@@ -163,11 +163,11 @@ async function recognizeChatFile(
   signal: AbortSignal | undefined,
 ): Promise<string | undefined> {
   if (!configured(config)) return undefined
-  const dataURL = `data:${file.ref.mediaType};base64,${Buffer.from(file.data).toString('base64')}`
-  const filename = file.ref.name ?? `attachment.${extension(file.ref) ?? 'bin'}`
+  const dataURL = `data:${file.mediaType};base64,${Buffer.from(file.data).toString('base64')}`
+  const filename = file.name ?? `attachment.${extension(file) ?? 'bin'}`
   const media = kind === 'video'
     ? { type: 'video_url', video_url: { url: dataURL } }
-    : file.ref.mediaType.startsWith('image/')
+    : file.mediaType.startsWith('image/')
       ? { type: 'image_url', image_url: { url: dataURL } }
       : { type: 'file', file: { filename, file_data: dataURL } }
   const response = await fetch(operationEndpoint(config, 'chat/completions'), {
@@ -201,7 +201,7 @@ async function transcribeAudio(
   if (!configured(config)) return undefined
   const form = new FormData()
   form.set('model', config.model)
-  form.set('file', new File([Uint8Array.from(file.data).buffer], file.ref.name ?? 'audio', { type: file.ref.mediaType }))
+  form.set('file', new File([Uint8Array.from(file.data).buffer], file.name ?? 'audio', { type: file.mediaType }))
   const response = await fetch(operationEndpoint(config, 'audio/transcriptions'), {
     method: 'POST',
     headers: await authorizationHeaders(ctx, config),
@@ -261,38 +261,38 @@ export function apply(ctx: Context, config: Config): void {
   const maxZipEntries = config.maxZipEntries ?? 4_000
   const recognizer: FileRecognizer = {
     id: 'officeparser',
-    supports: (ref) => {
-      const suffix = extension(ref)
+    supports: (file) => {
+      const suffix = extension(file)
       const settings = current()
-      return ref.mediaType.startsWith('text/')
+      return file.mediaType.startsWith('text/')
         || (suffix !== undefined && (OFFICE_EXTENSIONS.has(suffix) || TEXT_EXTENSIONS.has(suffix)))
         || (configured(settings.ocr)
-          && (ref.mediaType.startsWith('image/') || (suffix !== undefined && IMAGE_EXTENSIONS.has(suffix))))
+          && (file.mediaType.startsWith('image/') || (suffix !== undefined && IMAGE_EXTENSIONS.has(suffix))))
         || (configured(settings.audioTranscription)
-          && (ref.mediaType.startsWith('audio/') || (suffix !== undefined && AUDIO_EXTENSIONS.has(suffix))))
+          && (file.mediaType.startsWith('audio/') || (suffix !== undefined && AUDIO_EXTENSIONS.has(suffix))))
         || (configured(settings.videoUnderstanding)
-          && (ref.mediaType.startsWith('video/') || (suffix !== undefined && VIDEO_EXTENSIONS.has(suffix))))
+          && (file.mediaType.startsWith('video/') || (suffix !== undefined && VIDEO_EXTENSIONS.has(suffix))))
     },
     recognize: async (file, signal) => {
       signal?.throwIfAborted()
       if (file.data.byteLength > maxInputBytes) return undefined
-      const suffix = extension(file.ref)
+      const suffix = extension(file)
       const settings = current()
-      if (file.ref.mediaType.startsWith('text/') || (suffix !== undefined && TEXT_EXTENSIONS.has(suffix))) {
+      if (file.mediaType.startsWith('text/') || (suffix !== undefined && TEXT_EXTENSIONS.has(suffix))) {
         const text = new TextDecoder('utf-8', { fatal: true }).decode(file.data)
         return text === '' ? undefined : { text: truncate(text, maxExtractedChars) }
       }
       try {
-        if (file.ref.mediaType.startsWith('video/')
-          || (!file.ref.mediaType.startsWith('audio/') && suffix !== undefined && VIDEO_EXTENSIONS.has(suffix))) {
+        if (file.mediaType.startsWith('video/')
+          || (!file.mediaType.startsWith('audio/') && suffix !== undefined && VIDEO_EXTENSIONS.has(suffix))) {
           const text = await recognizeChatFile(ctx, file, settings.videoUnderstanding ?? {}, 'video', signal)
           return text === undefined ? undefined : { text: truncate(text, maxExtractedChars) }
         }
-        if (file.ref.mediaType.startsWith('audio/') || (suffix !== undefined && AUDIO_EXTENSIONS.has(suffix))) {
+        if (file.mediaType.startsWith('audio/') || (suffix !== undefined && AUDIO_EXTENSIONS.has(suffix))) {
           const text = await transcribeAudio(ctx, file, settings.audioTranscription ?? {}, signal)
           return text === undefined ? undefined : { text: truncate(text, maxExtractedChars) }
         }
-        if (file.ref.mediaType.startsWith('image/') || (suffix !== undefined && IMAGE_EXTENSIONS.has(suffix))) {
+        if (file.mediaType.startsWith('image/') || (suffix !== undefined && IMAGE_EXTENSIONS.has(suffix))) {
           const text = await recognizeChatFile(ctx, file, settings.ocr ?? {}, 'ocr', signal)
           return text === undefined ? undefined : { text: truncate(text, maxExtractedChars) }
         }

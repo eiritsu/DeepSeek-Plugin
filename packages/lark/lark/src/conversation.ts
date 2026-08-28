@@ -7,11 +7,9 @@ import type { Context } from '@deepseek-ai/cordis'
 import type { Agent, AgentHandle } from '@deepseek-ai/dsh-agent'
 import type {} from '@deepseek-ai/dsh-agent-default-model'
 import type {
-  AttachmentRef,
-  FileAttachmentRef,
+  FileRecognitionInput,
   ImageAttachmentRef,
   ImageMediaType,
-  SaveFileAttachment,
   SaveImageAttachment,
 } from '@deepseek-ai/dsh-attachment'
 import { UNKNOWN_FILE_MEDIA_TYPE } from '@deepseek-ai/dsh-attachment'
@@ -49,13 +47,7 @@ interface PendingTurnResponse {
 
 interface PreparedResource {
   readonly descriptor: ResourceDescriptor
-  readonly input: SaveImageAttachment | SaveFileAttachment
-  readonly kind: 'image' | 'file'
-}
-
-interface StoredResource {
-  readonly descriptor: ResourceDescriptor
-  readonly ref: AttachmentRef
+  readonly input: SaveImageAttachment | FileRecognitionInput
   readonly kind: 'image' | 'file'
 }
 
@@ -204,7 +196,9 @@ export class LarkConversationBridge {
       await this.sendResponse(message, await response.promise)
     } catch (error: unknown) {
       if (this.abort.signal.aborted) return
-      this.ctx.logger.warn(`Lark message ${message.messageId} failed: ${String(error)}`)
+      const diagnostic = error instanceof Error ? error.stack ?? error.message : String(error)
+      this.ctx.logger.warn(`Lark message ${message.messageId} failed: ${diagnostic}`)
+      process.stderr.write(`[dsh-lark] message ${message.messageId} failed: ${diagnostic}\n`)
       try {
         await this.channel.reply(message, { text: '处理消息时发生错误，请稍后重试。' })
       } catch (replyError: unknown) {
@@ -226,37 +220,24 @@ export class LarkConversationBridge {
         : []))
     const imageInputs = prepared.filter(resource => resource.kind === 'image')
       .map(resource => resource.input as SaveImageAttachment)
-    const fileInputs = prepared.filter(resource => resource.kind === 'file')
-      .map(resource => resource.input as SaveFileAttachment)
-    const [imageRefs, fileRefs] = await Promise.all([
-      imageInputs.length === 0 ? [] : this.ctx.attachments.saveImages(imageInputs),
-      fileInputs.length === 0 ? [] : this.ctx.attachments.saveFiles(fileInputs),
-    ])
+    const imageRefs = imageInputs.length === 0 ? [] : await this.ctx.attachments.saveImages(imageInputs)
     let imageIndex = 0
-    let fileIndex = 0
-    const stored: StoredResource[] = prepared.map(resource => resource.kind === 'image'
-      ? { kind: 'image', descriptor: resource.descriptor, ref: imageRefs[imageIndex++] as ImageAttachmentRef }
-      : { kind: 'file', descriptor: resource.descriptor, ref: fileRefs[fileIndex++] as FileAttachmentRef })
     const blocks: ContentBlock[] = message.content.trim().length === 0
       ? []
       : [{ type: 'text', text: message.content }]
-    for (const resource of stored) {
+    for (const resource of prepared) {
       if (resource.kind === 'image') {
-        const ref = resource.ref as ImageAttachmentRef
-        const recognized = await this.ctx.attachments.recognizeImage(ref, this.abort.signal)
-        blocks.push({
-          type: 'image',
-          attachment: ref,
-          ...recognized === undefined || recognized.text === '' ? {} : { recognizedText: recognized.text },
-        })
+        const ref = imageRefs[imageIndex++] as ImageAttachmentRef
+        blocks.push({ type: 'image', attachment: ref })
       } else {
-        const ref = resource.ref as FileAttachmentRef
-        const recognized = await this.ctx.attachments.recognizeFile(ref, this.abort.signal)
-        blocks.push({
-          type: 'file',
-          attachment: ref,
-          ...recognized === undefined || recognized.text === '' ? {} : { recognizedText: recognized.text },
-        })
+        const input = resource.input as FileRecognitionInput
+        const recognized = await this.ctx.attachments.recognizeFile(input, this.abort.signal)
+        if (recognized !== undefined && recognized.text !== '') {
+          blocks.push({
+            type: 'text',
+            text: `Attached file ${JSON.stringify(input.name ?? 'attachment')} content:\n${recognized.text}`,
+          })
+        }
       }
     }
     return blocks
@@ -343,22 +324,13 @@ export class LarkConversationBridge {
     const text = blocks.flatMap(block => block.type === 'text' ? [block.text] : []).join('\n').trim()
     let sent = false
     if (text.length > 0) {
-      await this.channel.reply(inbound, { markdown: text })
+      await this.channel.reply(inbound, { text })
       sent = true
     }
     for (const block of blocks) {
       if (block.type === 'image') {
         const stored = await this.ctx.attachments.readImage(block.attachment, this.abort.signal)
         await this.channel.reply(inbound, { image: { source: Buffer.from(stored.data) } })
-        sent = true
-      } else if (block.type === 'file') {
-        const stored = await this.ctx.attachments.readFile(block.attachment, this.abort.signal)
-        await this.channel.reply(inbound, {
-          file: {
-            source: Buffer.from(stored.data),
-            fileName: block.attachment.name ?? 'attachment.bin',
-          },
-        })
         sent = true
       }
     }
@@ -397,7 +369,6 @@ export class LarkConversationBridge {
   }
 
   private async createOrResumeAgent(sessionId: SessionId): Promise<Agent> {
-    const workspace = await this.resolveWorkspace()
     const stored = (await this.ctx.sessionPersistence.list(this.abort.signal))
       .some(header => header.id === sessionId)
     const selection = this.ctx.agentDefaultModel.currentSelection()
@@ -418,6 +389,7 @@ export class LarkConversationBridge {
           meta: { cwd: this.options.cwd },
           setup,
         })
+    const workspace = await this.resolveWorkspace(handle.agent.session.header.cwd ?? this.options.cwd)
     try {
       await workspace.attachSession(sessionId)
     } catch (error) {
@@ -430,7 +402,7 @@ export class LarkConversationBridge {
 
   /** Add Lark-owned context and Workspace membership to an Agent resumed by another client. */
   private async configureLiveAgent(sessionId: SessionId, agent: Agent): Promise<Agent> {
-    const workspace = await this.resolveWorkspace()
+    const workspace = await this.resolveWorkspace(agent.session.header.cwd ?? this.options.cwd)
     const fiber = await agent.ctx.plugin(timeContext, { timeZone: this.options.timeZone })
     try {
       await workspace.attachSession(sessionId)
@@ -459,8 +431,8 @@ export class LarkConversationBridge {
   }
 
   /** Resolve the configured directory to one durable, user-renamable Workspace. */
-  private async resolveWorkspace(): Promise<Workspace> {
-    return await this.ctx.workspaceRegistry.resolveByPath(this.options.cwd)
-      ?? await this.ctx.workspaceRegistry.create(this.options.cwd)
+  private async resolveWorkspace(cwd: string): Promise<Workspace> {
+    return await this.ctx.workspaceRegistry.resolveByPath(cwd)
+      ?? await this.ctx.workspaceRegistry.create(cwd)
   }
 }

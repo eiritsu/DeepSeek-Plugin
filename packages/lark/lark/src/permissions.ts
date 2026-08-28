@@ -79,6 +79,7 @@ const IM_USER_SCOPES = [
   'im:message.group_msg:get_as_user',
   'im:message.p2p_msg:get_as_user',
   'im:message.reactions:read',
+  'im:message.send_as_user',
   'im:message:readonly',
   'search:message',
 ] as const

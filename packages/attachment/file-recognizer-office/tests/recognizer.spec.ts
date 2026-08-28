@@ -1,7 +1,6 @@
 import { Buffer } from 'node:buffer'
 import { Context } from '@deepseek-ai/cordis'
-import type { FileAttachmentRef, FileRecognizer } from '@deepseek-ai/dsh-attachment'
-import { AttachmentId } from '@deepseek-ai/dsh-attachment'
+import type { FileRecognitionInput, FileRecognizer } from '@deepseek-ai/dsh-attachment'
 import { SettingsProvider } from '@deepseek-ai/dsh-settings'
 import type { SettingsNamespace } from '@deepseek-ai/dsh-settings'
 import { zipSync, strToU8 } from 'fflate'
@@ -44,11 +43,10 @@ function registered(config: Parameters<typeof apply>[1] = {}, apiKey?: string): 
   return recognizer
 }
 
-function ref(name: string, mediaType = 'application/octet-stream'): FileAttachmentRef {
+function ref(name: string, mediaType = 'application/octet-stream'): FileRecognitionInput {
   return {
-    attachmentId: AttachmentId(`sha256:${'a'.repeat(64)}`),
+    data: new Uint8Array(),
     mediaType,
-    bytes: 1,
     name,
   }
 }
@@ -106,7 +104,7 @@ describe('file-recognizer-office', () => {
     const recognizer = registered({ maxExtractedChars: 4 })
     const attachment = ref('notes.unknown', 'text/plain')
     const result = await recognizer.recognize({
-      ref: attachment,
+      ...attachment,
       data: new TextEncoder().encode('abcdef'),
     })
     expect(recognizer.supports(attachment)).toBe(true)
@@ -117,7 +115,7 @@ describe('file-recognizer-office', () => {
     const recognizer = registered()
     const attachment = ref('README.md')
     const result = await recognizer.recognize({
-      ref: attachment,
+      ...attachment,
       data: new TextEncoder().encode('# Harness\n\nMarkdown content.'),
     })
     expect(recognizer.supports(attachment)).toBe(true)
@@ -128,16 +126,16 @@ describe('file-recognizer-office', () => {
     const recognizer = registered()
     const attachment = ref('brief.docx')
     const data = docx('Hello DSH')
-    const result = await recognizer.recognize({ ref: { ...attachment, bytes: data.byteLength }, data })
+    const result = await recognizer.recognize({ ...attachment, data })
     expect(result?.text).toContain('Hello DSH')
   })
 
   it('refuses archives and inputs outside configured resource limits', async () => {
     const data = docx('bounded')
     const attachment = ref('brief.docx')
-    await expect(registered({ maxZipEntries: 1 }).recognize({ ref: attachment, data }))
+    await expect(registered({ maxZipEntries: 1 }).recognize({ ...attachment, data }))
       .resolves.toBeUndefined()
-    await expect(registered({ maxInputBytes: 1 }).recognize({ ref: attachment, data }))
+    await expect(registered({ maxInputBytes: 1 }).recognize({ ...attachment, data }))
       .resolves.toBeUndefined()
   })
 
@@ -145,7 +143,7 @@ describe('file-recognizer-office', () => {
     const recognizer = registered()
     expect(recognizer.supports(ref('archive.rar'))).toBe(false)
     await expect(recognizer.recognize({
-      ref: ref('broken.docx'),
+      ...ref('broken.docx'),
       data: new Uint8Array(Buffer.from('not a zip')),
     })).resolves.toBeUndefined()
   })
@@ -164,7 +162,7 @@ describe('file-recognizer-office', () => {
     }, 'audio-secret')
     const attachment = ref('sample.mp3', 'audio/mpeg')
 
-    await expect(recognizer.recognize({ ref: attachment, data: new Uint8Array([1, 2, 3]) }))
+    await expect(recognizer.recognize({ ...attachment, data: new Uint8Array([1, 2, 3]) }))
       .resolves.toEqual({ text: 'spoken words' })
     const [url, init] = fetchMock.mock.calls[0] ?? []
     expect(url).toBe('https://audio.test/v1/audio/transcriptions')
@@ -194,7 +192,7 @@ describe('file-recognizer-office', () => {
     })
     const attachment = ref(filename, mediaType)
 
-    await expect(recognizer.recognize({ ref: attachment, data: new Uint8Array([4, 5, 6]) }))
+    await expect(recognizer.recognize({ ...attachment, data: new Uint8Array([4, 5, 6]) }))
       .resolves.toEqual({ text: 'recognized content' })
     expect(fetchMock.mock.calls[0]?.[0]).toBe(expectedUrl)
     const requestBody = fetchMock.mock.calls[0]?.[1]?.body

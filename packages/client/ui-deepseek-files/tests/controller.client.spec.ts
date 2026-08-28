@@ -24,16 +24,17 @@ function fixture() {
       listeners.add(listener)
       return () => { listeners.delete(listener) }
     },
+    mutate: vi.fn(() => Promise.resolve()),
     set,
     unset: vi.fn(() => Promise.resolve()),
   }
-  const describe = vi.fn(async () => ({ result: { ok: true as const, value: { credentials: {
+  const describe = vi.fn(async () => ({ ok: true as const, value: {
     [CREDENTIAL_REFS.ocr]: { configured: true, writable: true },
-  } } } }))
+  } }))
   const credentials = {
     describe,
-    set: vi.fn(() => Promise.resolve({ result: { ok: true as const, value: {} } })),
-    unset: vi.fn(() => Promise.resolve({ result: { ok: true as const, value: {} } })),
+    set: vi.fn(() => Promise.resolve({ ok: true as const, value: {} })),
+    unset: vi.fn(() => Promise.resolve({ ok: true as const, value: {} })),
   }
   const controller = new DeepseekFilesSettingsController(scope, { credentials } as never)
   return { controller, credentials, set, listeners }
@@ -49,12 +50,12 @@ describe('DeepseekFilesSettingsController', () => {
       model: 'model-1',
       apiKeyEnv: CREDENTIAL_REFS.ocr,
     })
-    expect(test.credentials.set).toHaveBeenCalledWith({ ref: CREDENTIAL_REFS.ocr, value: 'key-1' })
+    expect(test.credentials.set).toHaveBeenCalledWith(CREDENTIAL_REFS.ocr, 'key-1')
     expect(test.controller.store.getSnapshot()).toMatchObject({ outcome: 'saved' })
     expect(test.controller.store.getSnapshot()).not.toHaveProperty('busy')
 
     await test.controller.removeKey('ocr')
-    expect(test.credentials.unset).toHaveBeenCalledWith({ ref: CREDENTIAL_REFS.ocr })
+    expect(test.credentials.unset).toHaveBeenCalledWith(CREDENTIAL_REFS.ocr)
     test.controller.dispose()
     expect(test.listeners.size).toBe(0)
   })

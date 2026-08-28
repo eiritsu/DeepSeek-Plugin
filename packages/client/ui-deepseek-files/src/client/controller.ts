@@ -1,6 +1,6 @@
 /** Settings and credential state for the Deepseek-Files section. */
 
-import type { IApiClient } from '@deepseek-ai/dsh-api-remotes/client'
+import type { ClientRemote } from '@deepseek-ai/dsh-api-remotes/client'
 import { createSnapshotStore, type SettingsScope, type SnapshotStore } from '@deepseek-ai/dsh-client-runtime/client'
 
 /** Recognition provider identities shown by the Settings page. */
@@ -77,7 +77,7 @@ export class DeepseekFilesSettingsController {
    */
   constructor(
     private readonly scope: SettingsScope<DeepseekFilesSettings>,
-    private readonly api: Pick<IApiClient, 'credentials'>,
+    private readonly api: Pick<ClientRemote, 'credentials'>,
   ) {
     this.unsubscribe = scope.subscribe(() => { this.adopt() })
     this.adopt()
@@ -86,9 +86,9 @@ export class DeepseekFilesSettingsController {
   /** Load credential presence without exposing values. */
   async loadCredentials(): Promise<void> {
     const refs = Object.values(CREDENTIAL_REFS)
-    const response = await this.api.credentials.describe({ refs })
-    if (!response.result.ok) return
-    const credentials = response.result.value.credentials
+    const response = await this.api.credentials.describe(refs)
+    if (!response.ok) return
+    const credentials = response.value
     this.store.update((draft) => {
       for (const kind of Object.keys(CREDENTIAL_REFS) as RecognitionKind[]) {
         const credential = credentials[CREDENTIAL_REFS[kind]]
@@ -122,7 +122,7 @@ export class DeepseekFilesSettingsController {
       if (accepted?.endpoint !== endpoint.trim() || accepted.model !== model.trim()) {
         throw new Error('settings write was not accepted')
       }
-      if (apiKey.length > 0) await this.api.credentials.set({ ref: CREDENTIAL_REFS[kind], value: apiKey })
+      if (apiKey.length > 0) await this.api.credentials.set(CREDENTIAL_REFS[kind], apiKey)
       await this.loadCredentials()
       if (apiKey.length > 0 && !this.store.getSnapshot().credentials[kind].configured) {
         throw new Error('credential write was not accepted')
@@ -141,7 +141,7 @@ export class DeepseekFilesSettingsController {
    */
   async removeKey(kind: RecognitionKind): Promise<void> {
     try {
-      await this.api.credentials.unset({ ref: CREDENTIAL_REFS[kind] })
+      await this.api.credentials.unset(CREDENTIAL_REFS[kind])
       await this.loadCredentials()
     } catch (_writeFailure) {
       this.store.update((draft) => { draft.outcome = 'error' })

@@ -1,7 +1,8 @@
+// @vitest-environment jsdom
 import { Context, Service } from '@deepseek-ai/cordis'
 import { describe, expect, it, vi } from 'vitest'
 import { LocaleRuntime } from '@deepseek-ai/dsh-client-locale/client'
-import { SlotRegistry } from '@deepseek-ai/dsh-client-runtime/client'
+import { SlotRegistry } from '@deepseek-ai/dsh-client-ui-renderer/client'
 import { resolveSlotLabel } from '@deepseek-ai/dsh-client-ui-slots'
 import type { SettingsScope } from '@deepseek-ai/dsh-client-runtime/client'
 import { apply, inject } from '../src/client/index.ts'
@@ -30,15 +31,16 @@ async function bench() {
       revision: 0, writable: true, mode: 'host',
     }),
     subscribe: () => () => {},
+    mutate: () => Promise.resolve(),
     set: () => Promise.resolve(),
     unset: () => Promise.resolve(),
   }
   ctx.provide('settingsScope', { bind: () => scope })
-  ctx.provide('connection', { api: { credentials: {
-    describe: vi.fn(() => Promise.resolve({ result: { ok: true, value: { credentials: {} } } })),
+  ctx.provide('remote.credentials', {
+    describe: vi.fn(() => Promise.resolve({ ok: true, value: {} })),
     set: vi.fn(),
     unset: vi.fn(),
-  } } })
+  })
   const slots = ctx.get('slots') as SlotRegistry
   slots.register({
     name: 'root',
@@ -49,7 +51,7 @@ async function bench() {
 
 describe('ui-deepseek-files browser plugin', () => {
   it('declares the settings and credential services it uses', () => {
-    expect(inject).toEqual(['slots', 'locale', 'connection', 'remote', 'settingsScope'])
+    expect(inject).toEqual(['slots', 'locale', 'remote', 'remote.credentials', 'settingsScope'])
   })
 
   it('registers and releases one localized Settings section', async () => {

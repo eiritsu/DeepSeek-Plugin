@@ -16,7 +16,12 @@ import type { BuiltinProvider } from '@earendil-works/pi-ai/providers/all'
 import { getBuiltinModels, getBuiltinProviders } from '@earendil-works/pi-ai/providers/all'
 import { defineDomain } from '@deepseek-ai/dsh-storage-domain'
 import type { DomainGlobal } from '@deepseek-ai/dsh-storage-domain'
-import type { LlmModelCapacity, ModelModality } from '@deepseek-ai/dsh-llm'
+import type {
+  LegacyModelModality,
+  LlmModelCapacity,
+  LlmModelMetadataPatch,
+  ModelModality,
+} from '@deepseek-ai/dsh-llm'
 
 /** Default dynamic catalog endpoint used by Hermes/pi model generation. */
 export const DEFAULT_CATALOG_URL = 'https://models.dev/api.json'
@@ -72,6 +77,7 @@ const catalogCacheSchema = z.object({
 type CatalogDeclaration = z.infer<typeof declarationSchema>
 type CatalogCache = z.infer<typeof catalogCacheSchema>
 type CatalogProvider = z.infer<typeof providerSchema>
+type CatalogModality = z.infer<typeof modalitySchema>
 
 interface CatalogModelRef {
   id: string
@@ -93,7 +99,9 @@ const providerIds = new Set<string>(getBuiltinProviders())
 const ambiguous = Symbol('ambiguous-model-metadata')
 
 interface CatalogMetadata extends LlmModelCapacity {
-  input?: readonly ModelModality[]
+  input?: readonly LegacyModelModality[]
+  contextWindow?: number
+  maxOutputTokens?: number
 }
 
 type CatalogResolution<T> = { covered: false } | { covered: true; value: T | undefined }
@@ -104,14 +112,14 @@ function isBuiltinProvider(owner: string): owner is BuiltinProvider {
 }
 
 /** Whether two declarations name the same ordered modalities. */
-function sameModalities(left: readonly ModelModality[], right: readonly ModelModality[]): boolean {
+function sameModalities(left: readonly CatalogModality[], right: readonly CatalogModality[]): boolean {
   return left.length === right.length && left.every((value, index) => value === right[index])
 }
 
-/** Normalize a models.dev input list to the complete catalog modality vocabulary. */
-function supportedModalities(value: unknown): ModelModality[] | undefined {
+/** Normalize a models.dev input list to modalities the current LLM request vocabulary accepts. */
+function supportedModalities(value: unknown): LegacyModelModality[] | undefined {
   if (!Array.isArray(value)) return undefined
-  const input: ModelModality[] = []
+  const input: LegacyModelModality[] = []
   if (value.includes('text')) input.push('text')
   if (value.includes('image')) input.push('image')
   if (value.includes('audio')) input.push('audio')
@@ -256,7 +264,7 @@ class DynamicCatalog {
       (left, right) => left === right,
     )
     const builtin = this.builtin(model, owners)
-    const resolvedInput = input.covered ? input.value : builtin.input
+    const resolvedInput = input.covered ? supportedModalities(input.value) : builtin.input
     const resolvedContextWindow = contextWindow.covered ? contextWindow.value : builtin.contextWindow
     const resolvedMaxOutputTokens = maxOutputTokens.covered ? maxOutputTokens.value : builtin.maxOutputTokens
     return {
@@ -270,8 +278,10 @@ class DynamicCatalog {
     const owner = owners.length === 1 ? owners[0] : model.ownedBy
     if (owner !== undefined && isBuiltinProvider(owner)) {
       const hit = getBuiltinModels(owner).find(candidate => sameModelId(candidate.id, model.id))
-      return hit === undefined ? {} : {
-        input: hit.input,
+      if (hit === undefined) return {}
+      const input = supportedModalities(hit.input)
+      return {
+        ...input === undefined ? {} : { input },
         contextWindow: hit.contextWindow,
         maxOutputTokens: hit.maxTokens,
       }
@@ -280,7 +290,11 @@ class DynamicCatalog {
       getBuiltinModels(provider)
         .filter(candidate => sameModelId(candidate.id, model.id)),
     )
-    const input = this.consensus(candidates.map(candidate => candidate.input), sameModalities)
+    const inputs = candidates.flatMap((candidate) => {
+      const input = supportedModalities(candidate.input)
+      return input === undefined ? [] : [input]
+    })
+    const input = this.consensus(inputs, sameModalities)
     const contextWindow = this.consensus(
       candidates.map(candidate => candidate.contextWindow),
       (left, right) => left === right,
@@ -362,7 +376,7 @@ export const name = 'model-catalog'
 /** Services required by dynamic enrichment and durable last-good storage. */
 export const inject = ['llm', 'storageDomain']
 
-/** Register dynamic exact-catalog modality and capacity enrichment. */
+/** Register dynamic exact-route modality and capacity enrichment. */
 export async function apply(ctx: Context, config: Config): Promise<void> {
   const domain = await ctx.storageDomain.open(catalogDomainSpec)
   ctx.effect(() => () => domain.close(), 'modelCatalogPiAi.domainClose')
@@ -371,6 +385,22 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
     refreshIntervalMs: config.refreshIntervalMs ?? DEFAULT_REFRESH_INTERVAL_MS,
     requestTimeoutMs: config.requestTimeoutMs ?? DEFAULT_REQUEST_TIMEOUT_MS,
     maxResponseBytes: config.maxResponseBytes ?? DEFAULT_MAX_RESPONSE_BYTES,
+  })
+  ctx.llm.registerModelMetadataEnricher('models.dev', async ({ provider, model, metadata, signal }) => {
+    await catalog.refresh(signal)
+    const resolved = catalog.metadata({ id: model, ownedBy: provider })
+    const currentInput = resolved.input?.filter(
+      (modality): modality is ModelModality => modality === 'text' || modality === 'image',
+    )
+    const patch: LlmModelMetadataPatch = {
+      ...metadata.inputModalities === undefined && currentInput !== undefined
+        ? { inputModalities: currentInput } : {},
+      ...metadata.context === undefined && resolved.contextWindow !== undefined
+        ? { contextWindow: resolved.contextWindow } : {},
+      ...metadata.defaultMaxTokens === undefined && resolved.maxOutputTokens !== undefined
+        ? { maxTokens: resolved.maxOutputTokens } : {},
+    }
+    return Object.keys(patch).length === 0 ? undefined : patch
   })
   ctx.llm.registerModelDiscoveryEnricher(async ({ request, models }) => {
     await catalog.refresh(request.signal)

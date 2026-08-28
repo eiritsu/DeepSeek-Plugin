@@ -17,8 +17,10 @@ export type LarkManagementSectionProps = PropsRuntime<'settings.section'>
 function identityLabel(
   item: { available: boolean; verified?: boolean },
   t: LarkManagementSectionProps['t'],
+  missingScopes: readonly string[] = [],
 ): string {
   if (item.verified === false) return t('verifyFailed')
+  if (missingScopes.length > 0) return t('reauthorizationRequired')
   return item.available ? t('ready') : t('unavailable')
 }
 
@@ -96,10 +98,10 @@ export function LarkManagementSection({ useLarkManagement, controller, t }: Lark
           </li>
           <li>
             <span className={css.stepNumber}>2</span>
-            <div><strong>{t('userIdentity')}</strong><p>{t('userIdentityIntro')}</p>{value?.secretConfigured !== true ? <p className={css.blockedHint}>{t('userAuthBlocked')}</p> : null}</div>
+            <div><strong>{t('userIdentity')}</strong><p>{t('userIdentityIntro')}</p>{value?.secretConfigured !== true ? <p className={css.blockedHint}>{t('userAuthBlocked')}</p> : null}{value !== undefined && value.userAuthorizationMissingScopes.length > 0 && value.user.available ? <p className={css.blockedHint}>{t('missingUserScopes')} <code>{value.userAuthorizationMissingScopes.join(', ')}</code></p> : null}</div>
             <div className={css.stepAction}>
-              <strong className={css.identityStatus} data-ok={value?.user.available === true}>{value === undefined ? t('unknown') : identityLabel(value.user, t)}</strong>
-              {state.authPending ? <button type="button" disabled={state.busy !== undefined} onClick={() => { void controller.completeUserAuth() }}>{state.busy === 'complete-auth' ? t('completingAuth') : t('completeAuth')}</button> : <button type="button" disabled={state.busy !== undefined || value?.secretConfigured !== true} onClick={() => { void controller.beginUserAuth() }}>{state.busy === 'begin-auth' ? t('authorizing') : t('authorize')}</button>}
+              <strong className={css.identityStatus} data-ok={value?.user.available === true && value.userAuthorizationMissingScopes.length === 0}>{value === undefined ? t('unknown') : identityLabel(value.user, t, value.userAuthorizationMissingScopes)}</strong>
+              {state.authPending ? <button type="button" disabled={state.busy !== undefined} onClick={() => { void controller.completeUserAuth() }}>{state.busy === 'complete-auth' ? t('completingAuth') : t('completeAuth')}</button> : <button type="button" disabled={state.busy !== undefined || value?.secretConfigured !== true} onClick={() => { void controller.beginUserAuth() }}>{state.busy === 'begin-auth' ? t('authorizing') : value !== undefined && value.userAuthorizationMissingScopes.length > 0 && value.user.available ? t('reauthorize') : t('authorize')}</button>}
             </div>
           </li>
           <li>
