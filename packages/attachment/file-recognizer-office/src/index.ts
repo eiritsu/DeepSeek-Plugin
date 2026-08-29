@@ -3,12 +3,14 @@
 import { Buffer } from 'node:buffer'
 import type { Context } from '@deepseek-ai/cordis'
 import z from '@deepseek-ai/schemastery'
-import type { FileRecognitionInput, FileRecognizer } from '@deepseek-ai/dsh-attachment'
+import type { FileRecognizer } from '@deepseek-ai/dsh-attachment'
 import { credentialRef } from '@deepseek-ai/dsh-credentials'
 import { installSettingsSection, settingsNamespace } from '@deepseek-ai/dsh-settings'
 import { parseOfficeAsync } from 'officeparser'
 import yauzl from 'yauzl'
 import type { Entry } from 'yauzl'
+
+type RecognizerFile = { data: Uint8Array; mediaType: string; name?: string }
 
 const OFFICE_EXTENSIONS = new Set(['docx', 'pptx', 'xlsx', 'odt', 'odp', 'ods', 'pdf'])
 const ZIP_OFFICE_EXTENSIONS = new Set(['docx', 'pptx', 'xlsx', 'odt', 'odp', 'ods'])
@@ -101,7 +103,7 @@ function validateConfig(config: Config): void {
   }
 }
 
-function extension(file: FileRecognitionInput): string | undefined {
+function extension(file: { name?: string }): string | undefined {
   const name = file.name
   if (name === undefined) return undefined
   const index = name.lastIndexOf('.')
@@ -157,7 +159,7 @@ function responseText(value: unknown): string | undefined {
 
 async function recognizeChatFile(
   ctx: Context,
-  file: Parameters<FileRecognizer['recognize']>[0],
+  file: RecognizerFile,
   config: RecognitionEndpointConfig,
   kind: 'ocr' | 'video',
   signal: AbortSignal | undefined,
@@ -194,14 +196,14 @@ async function recognizeChatFile(
 
 async function transcribeAudio(
   ctx: Context,
-  file: Parameters<FileRecognizer['recognize']>[0],
+  file: RecognizerFile,
   config: RecognitionEndpointConfig,
   signal: AbortSignal | undefined,
 ): Promise<string | undefined> {
   if (!configured(config)) return undefined
   const form = new FormData()
   form.set('model', config.model)
-  form.set('file', new File([Uint8Array.from(file.data).buffer], file.name ?? 'audio', { type: file.mediaType }))
+  form.set('file', new File([Uint8Array.from(file.data).buffer], file.name ?? 'audio', { type: file.mediaType || 'application/octet-stream' }))
   const response = await fetch(operationEndpoint(config, 'audio/transcriptions'), {
     method: 'POST',
     headers: await authorizationHeaders(ctx, config),
@@ -267,33 +269,34 @@ export function apply(ctx: Context, config: Config): void {
       return file.mediaType.startsWith('text/')
         || (suffix !== undefined && (OFFICE_EXTENSIONS.has(suffix) || TEXT_EXTENSIONS.has(suffix)))
         || (configured(settings.ocr)
-          && (file.mediaType.startsWith('image/') || (suffix !== undefined && IMAGE_EXTENSIONS.has(suffix))))
+          && ((file.mediaType ?? '').startsWith('image/') || (suffix !== undefined && IMAGE_EXTENSIONS.has(suffix))))
         || (configured(settings.audioTranscription)
-          && (file.mediaType.startsWith('audio/') || (suffix !== undefined && AUDIO_EXTENSIONS.has(suffix))))
+          && ((file.mediaType ?? '').startsWith('audio/') || (suffix !== undefined && AUDIO_EXTENSIONS.has(suffix))))
         || (configured(settings.videoUnderstanding)
-          && (file.mediaType.startsWith('video/') || (suffix !== undefined && VIDEO_EXTENSIONS.has(suffix))))
+          && ((file.mediaType ?? '').startsWith('video/') || (suffix !== undefined && VIDEO_EXTENSIONS.has(suffix))))
     },
     recognize: async (file, signal) => {
       signal?.throwIfAborted()
       if (file.data.byteLength > maxInputBytes) return undefined
-      const suffix = extension(file)
+      const input: RecognizerFile = 'ref' in file ? { ...file.ref, data: file.data } : file
+      const suffix = extension(input)
       const settings = current()
-      if (file.mediaType.startsWith('text/') || (suffix !== undefined && TEXT_EXTENSIONS.has(suffix))) {
+      if (input.mediaType.startsWith('text/') || (suffix !== undefined && TEXT_EXTENSIONS.has(suffix))) {
         const text = new TextDecoder('utf-8', { fatal: true }).decode(file.data)
         return text === '' ? undefined : { text: truncate(text, maxExtractedChars) }
       }
       try {
-        if (file.mediaType.startsWith('video/')
-          || (!file.mediaType.startsWith('audio/') && suffix !== undefined && VIDEO_EXTENSIONS.has(suffix))) {
-          const text = await recognizeChatFile(ctx, file, settings.videoUnderstanding ?? {}, 'video', signal)
+        if (input.mediaType.startsWith('video/')
+          || (!input.mediaType.startsWith('audio/') && suffix !== undefined && VIDEO_EXTENSIONS.has(suffix))) {
+          const text = await recognizeChatFile(ctx, input, settings.videoUnderstanding ?? {}, 'video', signal)
           return text === undefined ? undefined : { text: truncate(text, maxExtractedChars) }
         }
-        if (file.mediaType.startsWith('audio/') || (suffix !== undefined && AUDIO_EXTENSIONS.has(suffix))) {
-          const text = await transcribeAudio(ctx, file, settings.audioTranscription ?? {}, signal)
+        if (input.mediaType.startsWith('audio/') || (suffix !== undefined && AUDIO_EXTENSIONS.has(suffix))) {
+          const text = await transcribeAudio(ctx, input, settings.audioTranscription ?? {}, signal)
           return text === undefined ? undefined : { text: truncate(text, maxExtractedChars) }
         }
-        if (file.mediaType.startsWith('image/') || (suffix !== undefined && IMAGE_EXTENSIONS.has(suffix))) {
-          const text = await recognizeChatFile(ctx, file, settings.ocr ?? {}, 'ocr', signal)
+        if (input.mediaType.startsWith('image/') || (suffix !== undefined && IMAGE_EXTENSIONS.has(suffix))) {
+          const text = await recognizeChatFile(ctx, input, settings.ocr ?? {}, 'ocr', signal)
           return text === undefined ? undefined : { text: truncate(text, maxExtractedChars) }
         }
         if (suffix === undefined || !OFFICE_EXTENSIONS.has(suffix)) return undefined
@@ -303,7 +306,7 @@ export function apply(ctx: Context, config: Config): void {
           outputErrorToConsole: false,
         })).trim()
         if (text === '' && suffix === 'pdf') {
-          text = await recognizeChatFile(ctx, file, settings.ocr ?? {}, 'ocr', signal) ?? ''
+          text = await recognizeChatFile(ctx, input, settings.ocr ?? {}, 'ocr', signal) ?? ''
         }
         signal?.throwIfAborted()
         return text === '' ? undefined : { text: truncate(text, maxExtractedChars) }

@@ -7,7 +7,7 @@ import type { Context } from '@deepseek-ai/cordis'
 import type { Agent, AgentHandle } from '@deepseek-ai/dsh-agent'
 import type {} from '@deepseek-ai/dsh-agent-default-model'
 import type {
-  FileRecognitionInput,
+  FileAttachmentRef,
   ImageAttachmentRef,
   ImageMediaType,
   SaveImageAttachment,
@@ -47,7 +47,7 @@ interface PendingTurnResponse {
 
 interface PreparedResource {
   readonly descriptor: ResourceDescriptor
-  readonly input: SaveImageAttachment | FileRecognitionInput
+  readonly input: SaveImageAttachment | { data: Uint8Array; mediaType: string; name?: string }
   readonly kind: 'image' | 'file'
 }
 
@@ -221,7 +221,11 @@ export class LarkConversationBridge {
     const imageInputs = prepared.filter(resource => resource.kind === 'image')
       .map(resource => resource.input as SaveImageAttachment)
     const imageRefs = imageInputs.length === 0 ? [] : await this.ctx.attachments.saveImages(imageInputs)
+    const fileInputs = prepared.filter(resource => resource.kind === 'file').map(resource => resource.input as { data: Uint8Array; mediaType: string; name?: string })
+    const fileStore = this.ctx.attachments as typeof this.ctx.attachments & { saveFiles?: (inputs: readonly { data: Uint8Array; mediaType: string; name?: string }[]) => Promise<readonly FileAttachmentRef[]> }
+    const fileRefs = fileInputs.length === 0 || fileStore.saveFiles === undefined ? [] : await fileStore.saveFiles(fileInputs)
     let imageIndex = 0
+    let fileIndex = 0
     const blocks: ContentBlock[] = message.content.trim().length === 0
       ? []
       : [{ type: 'text', text: message.content }]
@@ -230,13 +234,14 @@ export class LarkConversationBridge {
         const ref = imageRefs[imageIndex++] as ImageAttachmentRef
         blocks.push({ type: 'image', attachment: ref })
       } else {
-        const input = resource.input as FileRecognitionInput
-        const recognized = await this.ctx.attachments.recognizeFile(input, this.abort.signal)
-        if (recognized !== undefined && recognized.text !== '') {
-          blocks.push({
-            type: 'text',
-            text: `Attached file ${JSON.stringify(input.name ?? 'attachment')} content:\n${recognized.text}`,
-          })
+        const input = resource.input as { data: Uint8Array; mediaType: string; name?: string }
+        const ref = fileRefs[fileIndex++] as FileAttachmentRef | undefined
+        if (ref !== undefined) {
+          const recognized = await this.ctx.attachments.recognizeFile(ref, this.abort.signal)
+          blocks.push(recognized?.text ? { type: 'file', attachment: ref, recognizedText: recognized.text } : { type: 'file', attachment: ref })
+        } else {
+          const recognized = await this.ctx.attachments.recognizeFile(input, this.abort.signal)
+          if (recognized !== undefined && recognized.text !== '') blocks.push({ type: 'text', text: `Attached file ${JSON.stringify(input.name ?? 'attachment')} content:\n${recognized.text}` })
         }
       }
     }
