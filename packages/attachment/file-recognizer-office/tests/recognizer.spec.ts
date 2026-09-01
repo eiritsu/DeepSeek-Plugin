@@ -122,6 +122,17 @@ describe('file-recognizer-office', () => {
     expect(result?.text).toBe('# Harness\n\nMarkdown content.')
   })
 
+  it('recognizes JSON documents by filename when the browser reports application/json', async () => {
+    const recognizer = registered()
+    const attachment = ref('settings.json', 'application/json')
+    const result = await recognizer.recognize({
+      ...attachment,
+      data: new TextEncoder().encode('{"enabled":true}'),
+    })
+    expect(recognizer.supports(attachment)).toBe(true)
+    expect(result?.text).toBe('{"enabled":true}')
+  })
+
   it('extracts text from a bounded DOCX archive', async () => {
     const recognizer = registered()
     const attachment = ref('brief.docx')
