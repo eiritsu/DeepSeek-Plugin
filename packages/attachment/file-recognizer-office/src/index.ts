@@ -5,7 +5,7 @@ import type { Context } from '@deepseek-ai/cordis'
 import z from '@deepseek-ai/schemastery'
 import type { FileRecognizer } from '@deepseek-ai/dsh-attachment'
 import { credentialRef } from '@deepseek-ai/dsh-credentials'
-import { installSettingsSection, settingsNamespace } from '@deepseek-ai/dsh-settings'
+import { settingsNamespace } from '@deepseek-ai/dsh-settings'
 import { parseOfficeAsync } from 'officeparser'
 import yauzl from 'yauzl'
 import type { Entry } from 'yauzl'
@@ -252,7 +252,8 @@ async function preflightZip(data: Uint8Array, maxEntries: number, maxBytes: numb
 /** Register the common-document recognizer into the mounted attachment store. */
 export function apply(ctx: Context, config: Config): void {
   let current: () => Config = () => config
-  installSettingsSection(ctx, FILE_RECOGNIZER_SETTINGS_NAMESPACE, Config, config, {
+  const settings = ctx.get('settings')
+  settings?.installSection(ctx, FILE_RECOGNIZER_SETTINGS_NAMESPACE, Config, config, {
     setSource: (source) => { current = source },
     onChange: () => {},
     validate: validateConfig,
