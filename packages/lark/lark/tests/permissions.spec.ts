@@ -57,7 +57,7 @@ describe('Lark permission import template', () => {
     expect(parsed.scopes.user).toEqual(expect.arrayContaining([
       'vc:meeting.search:read',
       'vc:meeting.meetingevent:read',
-      'vc:meeting.meetingid:write',
+      'vc:meeting.meetingid:read',
       'vc:record:readonly',
       'minutes:minutes.search:read',
       'minutes:minutes.upload:write',
@@ -65,6 +65,9 @@ describe('Lark permission import template', () => {
     ]))
     expect(parsed.scopes.user).not.toContain('vc:meeting.bot.manage:write')
     expect(parsed.scopes.user).not.toContain('vc:meeting.realtime:read')
+    // Open Platform rejects the whole device-authorization scope list when one name
+    // does not exist; the meeting-id lookup scope is read-only.
+    expect(parsed.scopes.user).not.toContain('vc:meeting.meetingid:write')
     expect(parsed.scopes.tenant).not.toContain('vc:meeting.realtime:read')
   })
 
