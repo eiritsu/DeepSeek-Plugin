@@ -17,6 +17,8 @@ export interface LarkManagementState {
   busy?: 'save' | 'refresh' | 'copy' | 'begin-registration' | 'complete-registration' | 'begin-auth' | 'complete-auth' | 'clear-secret'
   /** Latest user-visible outcome. */
   outcome?: 'saved' | 'copied' | 'authorized' | 'error'
+  /** Non-secret operation failure returned by the Host. */
+  errorMessage?: string
   /** Current-user authorization is waiting for browser consent. */
   authPending: boolean
   /** Official PersonalAgent app registration is waiting for browser approval. */
@@ -39,6 +41,7 @@ export class LarkManagementController {
 
   /** Refresh credentials, identity, and permissions. */
   async refresh(): Promise<void> {
+    if (this.store.getSnapshot().busy !== undefined) return
     this.begin('refresh')
     try {
       const result = await this.remote.status()
@@ -47,9 +50,14 @@ export class LarkManagementController {
         draft.status = 'ready'
         draft.value = result.value
         draft.authPending = result.value.userAuthorizationPending
+        draft.registrationPending = draft.registrationPending && result.value.credentialMode !== 'managed'
       })
-    } catch (_statusFailure) {
-      this.store.update((draft) => { draft.status = 'error'; draft.outcome = 'error' })
+    } catch (statusFailure: unknown) {
+      this.store.update((draft) => {
+        draft.status = 'error'
+        draft.outcome = 'error'
+        draft.errorMessage = describeFailure(statusFailure)
+      })
     } finally {
       this.finish()
     }
@@ -67,8 +75,8 @@ export class LarkManagementController {
       if (!result.ok) throw new Error(result.error.message)
       this.store.update((draft) => { draft.outcome = 'saved' })
       await this.refreshValue()
-    } catch (_saveFailure) {
-      this.store.update((draft) => { draft.outcome = 'error' })
+    } catch (saveFailure: unknown) {
+      this.store.update((draft) => { draft.outcome = 'error'; draft.errorMessage = describeFailure(saveFailure) })
     } finally {
       this.finish()
     }
@@ -81,8 +89,8 @@ export class LarkManagementController {
       const result = await this.remote.clearSecret()
       if (!result.ok) throw new Error(result.error.message)
       await this.refreshValue()
-    } catch (_clearFailure) {
-      this.store.update((draft) => { draft.outcome = 'error' })
+    } catch (clearFailure: unknown) {
+      this.store.update((draft) => { draft.outcome = 'error'; draft.errorMessage = describeFailure(clearFailure) })
     } finally {
       this.finish()
     }
@@ -96,8 +104,8 @@ export class LarkManagementController {
       if (!result.ok) throw new Error(result.error.message)
       this.openUrl(result.value.verificationUrl)
       this.store.update((draft) => { draft.registrationPending = true })
-    } catch (_registrationFailure) {
-      this.store.update((draft) => { draft.outcome = 'error' })
+    } catch (registrationFailure: unknown) {
+      this.store.update((draft) => { draft.outcome = 'error'; draft.errorMessage = describeFailure(registrationFailure) })
     } finally {
       this.finish()
     }
@@ -118,8 +126,8 @@ export class LarkManagementController {
         draft.outcome = 'saved'
       })
       await this.refreshValue()
-    } catch (_registrationFailure) {
-      this.store.update((draft) => { draft.outcome = 'error' })
+    } catch (registrationFailure: unknown) {
+      this.store.update((draft) => { draft.outcome = 'error'; draft.errorMessage = describeFailure(registrationFailure) })
     } finally {
       this.finish()
     }
@@ -133,8 +141,8 @@ export class LarkManagementController {
     try {
       await navigator.clipboard.writeText(template)
       this.store.update((draft) => { draft.outcome = 'copied' })
-    } catch (_clipboardFailure) {
-      this.store.update((draft) => { draft.outcome = 'error' })
+    } catch (clipboardFailure: unknown) {
+      this.store.update((draft) => { draft.outcome = 'error'; draft.errorMessage = describeFailure(clipboardFailure) })
     } finally {
       this.finish()
     }
@@ -148,8 +156,8 @@ export class LarkManagementController {
       if (!result.ok) throw new Error(result.error.message)
       this.openUrl(result.value.verificationUrl)
       this.store.update((draft) => { draft.authPending = true })
-    } catch (_authFailure) {
-      this.store.update((draft) => { draft.outcome = 'error' })
+    } catch (authFailure: unknown) {
+      this.store.update((draft) => { draft.outcome = 'error'; draft.errorMessage = describeFailure(authFailure) })
     } finally {
       this.finish()
     }
@@ -163,15 +171,15 @@ export class LarkManagementController {
       if (!result.ok) throw new Error(result.error.message)
       this.store.update((draft) => { draft.authPending = false; draft.outcome = 'authorized' })
       await this.refreshValue()
-    } catch (_authFailure) {
-      this.store.update((draft) => { draft.outcome = 'error' })
+    } catch (authFailure: unknown) {
+      this.store.update((draft) => { draft.outcome = 'error'; draft.errorMessage = describeFailure(authFailure) })
     } finally {
       this.finish()
     }
   }
 
   private begin(busy: NonNullable<LarkManagementState['busy']>): void {
-    this.store.update((draft) => { draft.busy = busy; delete draft.outcome })
+    this.store.update((draft) => { draft.busy = busy; delete draft.outcome; delete draft.errorMessage })
   }
 
   private finish(): void {
@@ -185,6 +193,11 @@ export class LarkManagementController {
       draft.status = 'ready'
       draft.value = result.value
       draft.authPending = result.value.userAuthorizationPending
+      draft.registrationPending = draft.registrationPending && result.value.credentialMode !== 'managed'
     })
   }
+}
+
+function describeFailure(error: unknown): string {
+  return error instanceof Error ? error.message : String(error)
 }

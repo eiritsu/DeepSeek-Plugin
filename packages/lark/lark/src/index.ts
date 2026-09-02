@@ -200,6 +200,7 @@ interface PendingManagedRegistration {
   readonly verificationUrl: Promise<string>
   readonly result: Promise<RegisterAppResult>
   readonly brand: 'feishu' | 'lark'
+  completion: Promise<void> | undefined
 }
 
 declare module '@deepseek-ai/cordis' {
@@ -420,8 +421,13 @@ export default class LarkManagementGateway extends TypertRemoteService {
       onQRCodeReady: info => { resolveUrl(info.url) },
     })
     void result.catch((error: unknown) => { rejectUrl(error) })
-    const pending = { controller, verificationUrl, result, brand } satisfies PendingManagedRegistration
+    const pending = { controller, verificationUrl, result, brand, completion: undefined } satisfies PendingManagedRegistration
     this.pendingRegistration = pending
+    // Persist credentials as soon as the official device flow resolves. The
+    // confirmation button remains idempotent and only advances to user OAuth.
+    void this.finalizeManagedRegistration(pending).catch((error: unknown) => {
+      this.ctx.logger.warn(`Managed Lark registration failed: ${message(error)}`)
+    })
     try {
       return { verificationUrl: await verificationUrl }
     } catch (error: unknown) {
@@ -436,38 +442,58 @@ export default class LarkManagementGateway extends TypertRemoteService {
     const pending = this.pendingRegistration
     if (pending === undefined) throw new Error('No managed Lark application registration is pending')
     try {
-      const registered = await pending.result
-      const appId = registered.client_id.trim()
-      const appSecret = registered.client_secret
-      const brand = registered.user_info?.tenant_brand ?? pending.brand
-      if (appId.length === 0 || appSecret.length === 0) {
-        throw new Error('Lark managed application registration returned incomplete credentials')
-      }
-      const previous = await this.ctx.credentials.resolve(LARK_APP_SECRET_REF)
-      await this.ctx.credentials.set(LARK_APP_SECRET_REF, appSecret)
-      try {
-        const initialized = await this.runCli([
-          'config', 'init', '--app-id', appId, '--app-secret-stdin', '--brand', brand,
-        ], undefined, `${appSecret}\n`)
-        if (initialized.exitCode !== 0) {
-          throw new Error(initialized.stderr || initialized.stdout || 'Lark CLI rejected managed application credentials')
-        }
-        await this.settings.update({
-          appId,
-          brand,
-          appSecretEnv: String(LARK_APP_SECRET_REF),
-          credentialMode: 'managed',
-          conversationUserOpenId: registered.user_info?.open_id ?? '',
-        })
-      } catch (error: unknown) {
-        if (previous === undefined) await this.ctx.credentials.unset(LARK_APP_SECRET_REF)
-        else await this.ctx.credentials.set(LARK_APP_SECRET_REF, previous.value)
-        throw error
-      }
-      await this.refreshConversation()
+      await this.finalizeManagedRegistration(pending)
     } finally {
       this.pendingRegistration = undefined
     }
+  }
+
+  /**
+   * Persist credentials returned by the official registration flow exactly once.
+   *
+   * @param pending - In-memory registration flow owned by this gateway.
+   * @returns A promise that settles after the CLI and settings contain the app.
+   */
+  private finalizeManagedRegistration(pending: PendingManagedRegistration): Promise<void> {
+    if (pending.completion !== undefined) return pending.completion
+    const completion = this.persistManagedRegistration(pending)
+    pending.completion = completion.catch((error: unknown) => {
+      pending.completion = undefined
+      throw error
+    })
+    return pending.completion
+  }
+
+  private async persistManagedRegistration(pending: PendingManagedRegistration): Promise<void> {
+    const registered = await pending.result
+    const appId = registered.client_id.trim()
+    const appSecret = registered.client_secret
+    const brand = registered.user_info?.tenant_brand ?? pending.brand
+    if (appId.length === 0 || appSecret.length === 0) {
+      throw new Error('Lark managed application registration returned incomplete credentials')
+    }
+    const previous = await this.ctx.credentials.resolve(LARK_APP_SECRET_REF)
+    await this.ctx.credentials.set(LARK_APP_SECRET_REF, appSecret)
+    try {
+      const initialized = await this.runCli([
+        'config', 'init', '--app-id', appId, '--app-secret-stdin', '--brand', brand,
+      ], undefined, `${appSecret}\n`)
+      if (initialized.exitCode !== 0) {
+        throw new Error(initialized.stderr || initialized.stdout || 'Lark CLI rejected managed application credentials')
+      }
+      await this.settings.update({
+        appId,
+        brand,
+        appSecretEnv: String(LARK_APP_SECRET_REF),
+        credentialMode: 'managed',
+        conversationUserOpenId: registered.user_info?.open_id ?? '',
+      })
+    } catch (error: unknown) {
+      if (previous === undefined) await this.ctx.credentials.unset(LARK_APP_SECRET_REF)
+      else await this.ctx.credentials.set(LARK_APP_SECRET_REF, previous.value)
+      throw error
+    }
+    await this.refreshConversation()
   }
 
   /** Start user OAuth for the capability scopes represented by the management page. */

@@ -51,6 +51,11 @@ export function LarkManagementSection({ useLarkManagement, controller, t }: Lark
     setAppId(value.appId)
     setBrand(value.brand)
   }, [value?.appId, value?.brand])
+  useEffect(() => {
+    if (!state.registrationPending) return
+    const timer = window.setInterval(() => { void controller.refresh() }, 2_000)
+    return () => { window.clearInterval(timer) }
+  }, [controller, state.registrationPending])
 
   if (state.status === 'loading' && value === undefined) return <p className={css.status}>{t('loading')}</p>
   if (state.status === 'error' && value === undefined) return <p className={css.error}>{t('loadFailed')}</p>
@@ -126,7 +131,7 @@ export function LarkManagementSection({ useLarkManagement, controller, t }: Lark
       {state.outcome === 'saved' ? <p className={css.success}>{t('saved')}</p> : null}
       {state.outcome === 'copied' ? <p className={css.success}>{t('copied')}</p> : null}
       {state.outcome === 'authorized' ? <p className={css.success}>{t('authorized')}</p> : null}
-      {state.outcome === 'error' ? <p className={css.error}>{t('operationFailed')}</p> : null}
+      {state.outcome === 'error' ? <p className={css.error}>{t('operationFailed')}{state.errorMessage === undefined ? null : <><br /><code>{state.errorMessage}</code></>}</p> : null}
     </div>
   )
 }

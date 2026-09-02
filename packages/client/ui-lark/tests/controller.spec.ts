@@ -63,6 +63,46 @@ describe('Lark managed connection', () => {
     })
   })
 
+  it('clears the app-registration step after Host auto-saves credentials', async () => {
+    const remote = {
+      status: vi.fn(async () => ({
+        ok: true,
+        value: { credentialMode: 'managed', userAuthorizationPending: false } as LarkManagementStatus,
+      })),
+    }
+    const controller = new LarkManagementController(
+      remote as unknown as ConstructorParameters<typeof LarkManagementController>[0],
+    )
+    controller.store.update((draft) => { draft.registrationPending = true })
+
+    await controller.refresh()
+
+    expect(controller.store.getSnapshot()).toMatchObject({
+      registrationPending: false,
+      status: 'ready',
+    })
+  })
+
+  it('surfaces a failed confirmation instead of appearing inert', async () => {
+    const remote = {
+      completeManagedRegistration: vi.fn(async () => ({
+        ok: false,
+        error: { message: 'No managed Lark application registration is pending' },
+      })),
+    }
+    const controller = new LarkManagementController(
+      remote as unknown as ConstructorParameters<typeof LarkManagementController>[0],
+    )
+    controller.store.update((draft) => { draft.registrationPending = true })
+
+    await controller.completeManagedRegistration()
+
+    expect(controller.store.getSnapshot()).toMatchObject({
+      outcome: 'error',
+      errorMessage: 'No managed Lark application registration is pending',
+    })
+  })
+
   it('completes authorization through the Host-owned pending code', async () => {
     const remote = {
       completeUserAuth: vi.fn(async () => ({ ok: true, value: undefined })),

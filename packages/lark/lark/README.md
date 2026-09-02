@@ -2,7 +2,7 @@
 
 侧载式 Lark/飞书集成。Host 插件通过 DSH Credentials 保存 App Secret，通过 Host Remote 向管理页提供不含秘密值的状态，通过官方 `@larksuite/cli` 执行业务命令，并通过官方 `@larksuite/channel` 建立消息长连接。插件注册 `lark_cli` 工具；审批层读取官方 CLI 的 `Risk: read` 命令声明，只读查询直接执行，数据变更命令进入 DSH approval 流程。
 
-默认快速连接使用官方 Channel SDK 的 `registerApp`，用户通过官方页面批准后，平台创建应用并返回凭据；页面不要求用户手填 App ID 或 App Secret。注册请求声明管理页权限模板中的 tenant/user scope，并包含 `im.message.receive_v1` 事件。高级方式可连接已有自建应用，插件通过官方 `config init --app-secret-stdin` 接口同步凭据，Secret 不进入 argv、浏览器响应或日志；自建应用还需在开放平台启用长连接事件订阅并订阅 `im.message.receive_v1`。
+默认快速连接使用官方 Channel SDK 的 `registerApp`，用户通过官方页面批准后，平台创建应用并返回凭据；Host 会在轮询完成时自动保存 App ID、App Secret 并初始化 CLI，页面不要求用户手填这些值，确认按钮只负责继续当前用户 OAuth。注册请求声明管理页权限模板中的 tenant/user scope，并包含 `im.message.receive_v1` 事件。高级方式可连接已有自建应用，插件通过官方 `config init --app-secret-stdin` 接口同步凭据，Secret 不进入 argv、浏览器响应或日志；自建应用还需在开放平台启用长连接事件订阅并订阅 `im.message.receive_v1`。
 
 两种方式都把 OAuth token 和 CLI 配置隔离在 `$DSH_HOME/lark-cli`，不读取系统级 `~/.lark-cli`。经 SHA-256 校验的官方 v1.0.90 二进制按平台下载到 `$DSH_HOME/lark-cli-bin/v1.0.90`，不会写入插件安装目录。管理页先显示应用/Bot 连接，再显示用户 OAuth；只有应用连接完成后才能授权当前用户。应用创建或批量导入一次性声明全部 capability user scope，紧接着的 OAuth 一次性请求同一集合，包括以当前用户身份发送消息所需的 `im:message.send_as_user`。应用权限已获取不等于用户已登录，查询个人日历等用户数据前必须完成用户 OAuth。待完成的用户授权由 Host Credentials 保存，关闭设置页、重启 App 或重载插件后仍可继续；功能更新改变用户权限集合时，旧授权请求自动失效，管理页会列出当前 token 缺少的 scope 并要求重新授权。两个身份可以同时使用；清除连接会移除该目录管理的应用配置和 token。
 
