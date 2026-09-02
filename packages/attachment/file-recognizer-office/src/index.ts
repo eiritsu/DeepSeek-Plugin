@@ -252,11 +252,12 @@ async function preflightZip(data: Uint8Array, maxEntries: number, maxBytes: numb
 /** Register the common-document recognizer into the mounted attachment store. */
 export function apply(ctx: Context, config: Config): void {
   let current: () => Config = () => config
-  const settings = ctx.get('settings')
-  settings?.installSection(ctx, FILE_RECOGNIZER_SETTINGS_NAMESPACE, Config, config, {
-    setSource: (source) => { current = source },
-    onChange: () => {},
-    validate: validateConfig,
+  ctx.inject(['settings'], (settingsCtx) => {
+    settingsCtx.settings.installSection(ctx, FILE_RECOGNIZER_SETTINGS_NAMESPACE, Config, config, {
+      setSource: (source) => { current = source },
+      onChange: () => {},
+      validate: validateConfig,
+    })
   })
   const maxInputBytes = config.maxInputBytes ?? 32 * 1024 * 1024
   const maxExtractedChars = config.maxExtractedChars ?? 200_000
