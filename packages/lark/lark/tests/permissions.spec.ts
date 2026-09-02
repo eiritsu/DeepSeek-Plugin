@@ -63,6 +63,8 @@ describe('Lark permission import template', () => {
       'minutes:minutes:update',
     ]))
     expect(parsed.scopes.user).not.toContain('vc:meeting.bot.manage:write')
+    expect(parsed.scopes.user).not.toContain('vc:meeting.realtime:read')
+    expect(parsed.scopes.tenant).not.toContain('vc:meeting.realtime:read')
   })
 
   it('declares the tenant scopes and event needed by the private-chat channel', () => {

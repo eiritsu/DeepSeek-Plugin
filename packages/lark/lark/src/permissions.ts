@@ -62,7 +62,6 @@ const MEETING_SHARED_SCOPES = [
   'vc:meeting.bot.join:write',
   'vc:meeting.interaction:write',
   'vc:meeting.message:write',
-  'vc:meeting.realtime:read',
   'minutes:minutes',
   'minutes:minutes.search:read',
   'minutes:minutes.basic:read',
