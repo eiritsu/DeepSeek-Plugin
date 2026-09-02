@@ -57,6 +57,7 @@ describe('Lark permission import template', () => {
     expect(parsed.scopes.user).toEqual(expect.arrayContaining([
       'vc:meeting.search:read',
       'vc:meeting.meetingevent:read',
+      'vc:meeting.meetingid:write',
       'vc:record:readonly',
       'minutes:minutes.search:read',
       'minutes:minutes.upload:write',

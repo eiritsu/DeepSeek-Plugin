@@ -80,6 +80,7 @@ const MEETING_TENANT_SCOPES = [
 /** User scopes required by the meeting/minutes commands shipped with the Lark CLI. */
 const MEETING_USER_SCOPES = [
   ...MEETING_SHARED_SCOPES,
+  'vc:meeting.meetingid:write',
   'vc:meeting.search:read',
   'minutes:minutes.upload:write',
   'minutes:minutes:update',
