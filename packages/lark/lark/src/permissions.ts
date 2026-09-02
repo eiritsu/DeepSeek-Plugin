@@ -53,9 +53,8 @@ const SLIDES_SCOPES = [
 
 const PERMISSION_INSPECTION_SCOPES = ['application:application:self_manage'] as const
 
-/** Scopes supported by both user and bot identities for meeting/minutes commands. */
+/** User scopes required by the meeting/minutes commands shipped with the Lark CLI. */
 const MEETING_SHARED_SCOPES = [
-  'vc:meeting',
   'vc:meeting.meetingevent:read',
   'vc:record:readonly',
   'vc:note:read',
@@ -71,14 +70,11 @@ const MEETING_SHARED_SCOPES = [
   'minutes:permission:apply',
 ] as const
 
-/** Application scopes required by bot-only meeting commands. */
-const MEETING_TENANT_SCOPES = [
-  ...MEETING_SHARED_SCOPES,
-  'vc:meeting.bot.manage:write',
-] as const
+/** Application scopes reported by Open Platform for tenant-token meeting access. */
+const MEETING_TENANT_SCOPES = ['vc:meeting', 'minutes:minutes'] as const
 
-/** User scopes required by the meeting/minutes commands shipped with the Lark CLI. */
 const MEETING_USER_SCOPES = [
+  'vc:meeting',
   ...MEETING_SHARED_SCOPES,
   'vc:meeting.meetingid:read',
   'vc:meeting.search:read',

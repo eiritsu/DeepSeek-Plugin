@@ -43,7 +43,8 @@ describe('Lark permission import template', () => {
       'im:message:readonly',
       'search:message',
     ]))
-    expect(parsed.scopes.tenant).toEqual(expect.arrayContaining([
+    expect(parsed.scopes.tenant).toEqual(expect.arrayContaining(['vc:meeting', 'minutes:minutes']))
+    expect(parsed.scopes.tenant).not.toEqual(expect.arrayContaining([
       'vc:meeting.meetingevent:read',
       'vc:record:readonly',
       'vc:note:read',
