@@ -43,6 +43,26 @@ describe('Lark permission import template', () => {
       'im:message:readonly',
       'search:message',
     ]))
+    expect(parsed.scopes.tenant).toEqual(expect.arrayContaining([
+      'vc:meeting.meetingevent:read',
+      'vc:record:readonly',
+      'vc:note:read',
+      'minutes:minutes.search:read',
+      'minutes:minutes.basic:read',
+      'minutes:minutes.artifacts:read',
+      'minutes:minutes.media:export',
+      'minutes:minutes:readonly',
+      'minutes:permission:apply',
+    ]))
+    expect(parsed.scopes.user).toEqual(expect.arrayContaining([
+      'vc:meeting.search:read',
+      'vc:meeting.meetingevent:read',
+      'vc:record:readonly',
+      'minutes:minutes.search:read',
+      'minutes:minutes.upload:write',
+      'minutes:minutes:update',
+    ]))
+    expect(parsed.scopes.user).not.toContain('vc:meeting.bot.manage:write')
   })
 
   it('declares the tenant scopes and event needed by the private-chat channel', () => {

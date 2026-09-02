@@ -53,6 +53,39 @@ const SLIDES_SCOPES = [
 
 const PERMISSION_INSPECTION_SCOPES = ['application:application:self_manage'] as const
 
+/** Scopes supported by both user and bot identities for meeting/minutes commands. */
+const MEETING_SHARED_SCOPES = [
+  'vc:meeting',
+  'vc:meeting.meetingevent:read',
+  'vc:record:readonly',
+  'vc:note:read',
+  'vc:meeting.bot.join:write',
+  'vc:meeting.interaction:write',
+  'vc:meeting.message:write',
+  'vc:meeting.realtime:read',
+  'minutes:minutes',
+  'minutes:minutes.search:read',
+  'minutes:minutes.basic:read',
+  'minutes:minutes.artifacts:read',
+  'minutes:minutes.media:export',
+  'minutes:minutes:readonly',
+  'minutes:permission:apply',
+] as const
+
+/** Application scopes required by bot-only meeting commands. */
+const MEETING_TENANT_SCOPES = [
+  ...MEETING_SHARED_SCOPES,
+  'vc:meeting.bot.manage:write',
+] as const
+
+/** User scopes required by the meeting/minutes commands shipped with the Lark CLI. */
+const MEETING_USER_SCOPES = [
+  ...MEETING_SHARED_SCOPES,
+  'vc:meeting.search:read',
+  'minutes:minutes.upload:write',
+  'minutes:minutes:update',
+] as const
+
 /** Tenant scopes required by the private-chat transport. */
 export const LARK_CONVERSATION_TENANT_SCOPES = [
   'im:message.p2p_msg:readonly',
@@ -129,7 +162,7 @@ export const LARK_CAPABILITIES: readonly LarkCapabilityDefinition[] = [
   { id: 'wiki', label: '知识库', tenant: ['wiki:wiki'], user: ['wiki:wiki'] },
   { id: 'contact', label: '通讯录', tenant: ['contact:user.employee:readonly'], user: ['contact:user.base:readonly'] },
   { id: 'mail', label: '邮箱', tenant: MAIL_SCOPES, user: [...MAIL_SCOPES, 'mail:event', 'mail:user_mailbox.message:send'] },
-  { id: 'meeting', label: '视频会议', tenant: ['vc:meeting', 'minutes:minutes'], user: ['vc:meeting', 'minutes:minutes'] },
+  { id: 'meeting', label: '视频会议', tenant: MEETING_TENANT_SCOPES, user: MEETING_USER_SCOPES },
   { id: 'attendance', label: '考勤打卡', tenant: ['attendance:task:readonly'], user: ['attendance:task:readonly'] },
   { id: 'approval', label: '审批', tenant: [], user: ['approval:approval:read', 'approval:instance:read', 'approval:instance:write', 'approval:task:read', 'approval:task:write'] },
   { id: 'okr', label: 'OKR', tenant: ['okr:okr'], user: ['okr:okr'] },
