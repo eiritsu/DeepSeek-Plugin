@@ -75,7 +75,8 @@ function makeBridge(options: { readonly riskyReview?: boolean } = {}) {
         category: 'external-project' as const,
         installable: false,
       }], hasMore: input.page === 1 }
-      case 'thirdPartyCatalog': return { plugins: [{
+      case 'thirdPartyCatalog':
+      case 'skillHubCatalog': return { plugins: [{
         id: 'MemTensor/MemOS/apps/memos-local-plugin',
         name: 'memos-local-plugin',
         repository: 'MemTensor/MemOS',
@@ -83,7 +84,7 @@ function makeBridge(options: { readonly riskyReview?: boolean } = {}) {
         chineseDescription: '第三方目录中的持久记忆插件。',
         stars: 10_930,
         categoryId: 'memory',
-        detailUrl: 'https://deepseek1024.com/plugins/MemTensor/MemOS/apps/memos-local-plugin',
+        detailUrl: 'https://skillhub.cloud.tencent.com/plugins/MemTensor/MemOS/apps/memos-local-plugin',
         repositoryUrl: 'https://github.com/MemTensor/MemOS',
       }],
       hasMore: input.page === 1,
@@ -183,40 +184,28 @@ describe('PluginLibraryOverlay', () => {
       expect((screen.getByLabelText(en.sourceLabel) as HTMLInputElement).value).toBe('/tmp/dsh-fixtures/local-plugin')
     })
     fireEvent.click(screen.getByRole('button', { name: en.discovery }))
-    expect(await screen.findByText('fixture/direct-plugin')).toBeTruthy()
-    expect(request).toHaveBeenCalledWith({ action: 'catalog', page: 1, pageSize: 12, query: '' })
-    expect(screen.queryByText('fixture/python-service')).toBeNull()
-    fireEvent.click(screen.getByRole('button', { name: en.reviewThis }))
-    expect(request).toHaveBeenCalledWith({ action: 'reviewRepository', repository: 'fixture/direct-plugin' })
-    expect(await screen.findByText(en.reviewReady)).toBeTruthy()
-    expect(screen.getByRole('button', { name: en.review }).getAttribute('aria-current')).toBe('page')
-    fireEvent.click(screen.getByRole('button', { name: en.discovery }))
-    fireEvent.click(screen.getByRole('button', { name: new RegExp(en.categoryExternal) }))
-    expect(screen.getByText('fixture/python-service')).toBeTruthy()
-    fireEvent.click(screen.getByRole('button', { name: new RegExp(en.categoryBundle) }))
-    fireEvent.click(screen.getByRole('button', { name: en.thirdPartyTab }))
     expect(await screen.findByText('memos-local-plugin')).toBeTruthy()
     expect(request).toHaveBeenCalledWith({
-      action: 'thirdPartyCatalog', page: 1, pageSize: 12, query: '', category: '', sort: 'stars',
+        action: 'skillHubCatalog', page: 1, pageSize: 12, query: '', category: '', sort: 'stars',
     })
     fireEvent.click(screen.getByRole('button', { name: /Memory.*271/ }))
     await vi.waitFor(() => {
       expect(request).toHaveBeenCalledWith({
-        action: 'thirdPartyCatalog', page: 1, pageSize: 12, query: '', category: 'memory', sort: 'stars',
+        action: 'skillHubCatalog', page: 1, pageSize: 12, query: '', category: 'memory', sort: 'stars',
       })
       expect(screen.getByRole('button', { name: en.search }).hasAttribute('disabled')).toBe(false)
     })
     fireEvent.change(screen.getByLabelText(en.searchThirdParty), { target: { value: 'memory' } })
     fireEvent.click(screen.getByRole('button', { name: en.search }))
     expect(request).toHaveBeenCalledWith({
-      action: 'thirdPartyCatalog', page: 1, pageSize: 12, query: 'memory', category: 'memory', sort: 'stars',
+      action: 'skillHubCatalog', page: 1, pageSize: 12, query: 'memory', category: 'memory', sort: 'stars',
     })
     await vi.waitFor(() => {
       expect(screen.getByRole('button', { name: en.loadMore }).hasAttribute('disabled')).toBe(false)
     })
     fireEvent.click(screen.getByRole('button', { name: en.loadMore }))
     expect(request).toHaveBeenCalledWith({
-      action: 'thirdPartyCatalog', page: 2, pageSize: 12, query: 'memory', category: 'memory', sort: 'stars',
+      action: 'skillHubCatalog', page: 2, pageSize: 12, query: 'memory', category: 'memory', sort: 'stars',
     })
     fireEvent.click(screen.getByRole('button', { name: en.reviewThis }))
     expect(request).toHaveBeenCalledWith({

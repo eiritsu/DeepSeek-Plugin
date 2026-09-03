@@ -2,7 +2,7 @@
 
 DeepSeek Harness 的自主插件工作区。这里同时保存可直接侧载的产品插件，以及依赖 DSH 已集成扩展点的内置扩展。插件包不会在安装时修改 Harness 源码、数据库格式或默认沙盒策略；标记为“需要 DSH 扩展点”的插件只能安装到已经包含对应底层能力的兼容版本。
 
-当前源码包括 Deepseek-Files、模型目录、插件库界面、macOS 桌面壳，以及 Lark/飞书管理插件。插件库的“审查安装”支持固定网络来源和本地插件目录；社区条目可直接送入同一审查流程。GitHub Topic 发布与公开插件市场发布不在本阶段范围内。
+当前源码包括 Deepseek-Files、模型目录、插件库界面、技能库界面、macOS 桌面壳，以及 Lark/飞书管理插件。插件库的“审查安装”支持固定网络来源和本地插件目录；“社区发现”通过 SkillHub 插件市场浏览并送入同一审查流程。技能库通过 SkillHub 技能市场提供搜索、筛选、分页、预加载和 ZIP 下载。
 
 ## 插件分类
 
@@ -14,6 +14,7 @@ DeepSeek Harness 的自主插件工作区。这里同时保存可直接侧载的
 | [`catalog/files/`](catalog/files/) | [Deepseek-Files](packages/attachment/file-recognizer-office/README.zh.md) | [需要附件识别与 prompt 准入扩展点](packages/attachment/file-recognizer-office/README.zh.md#需要的-harness-底层扩展点) |
 | [`catalog/models/`](catalog/models/) | [dsh-model-catalog](packages/llm/model-catalog/README.zh.md) | [需要模型发现与输入模态解析扩展点](packages/llm/model-catalog/README.zh.md#需要的-harness-底层扩展点) |
 | [`catalog/platform/`](catalog/platform/) | [插件库](packages/client/ui-plugin-library/README.zh.md) | UI 可侧载；本地目录选择需要配套桌面桥 |
+| [`catalog/platform/`](catalog/platform/) | [技能库](packages/client/ui-skill-library/README.zh.md) | SkillHub 技能市场；桌面页面内滚动并预加载 |
 
 ## 开发
 
@@ -52,6 +53,18 @@ mkdir -p "$PLUGIN_ROOT/artifacts"
 pnpm --dir packages/client/ui-plugin-library pack --pack-destination "$PLUGIN_ROOT/artifacts"
 cd '../DeepSeek Harness'
 pnpm dsh plugin --profile web add "$PLUGIN_ROOT/artifacts/deepseek-ai-dsh-client-ui-plugin-library-0.1.1-rc.3.tgz"
+```
+
+## 技能库侧载
+
+技能库与桌面壳配套使用，社区发现页通过原生桥接请求 SkillHub，避免 WebView 跨域限制。界面包含“已安装”“审查安装”“社区发现”“操作日志”四个 tab；当前社区发现聚焦可下载的 SkillHub 技能，不提供技能包 tab。
+
+```sh
+PLUGIN_ROOT=$PWD
+mkdir -p "$PLUGIN_ROOT/artifacts"
+pnpm --dir packages/client/ui-skill-library pack --pack-destination "$PLUGIN_ROOT/artifacts"
+cd '../DeepSeek Harness'
+pnpm dsh plugin --profile web add "$PLUGIN_ROOT/artifacts/deepseek-ai-dsh-client-ui-skill-library-0.1.0-alpha.1.tgz"
 ```
 
 ## 迁移边界

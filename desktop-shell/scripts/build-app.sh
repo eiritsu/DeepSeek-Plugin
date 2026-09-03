@@ -68,12 +68,24 @@ if [ "$DISTRIBUTION" = true ]; then
     "$SNAPSHOT_ROOT/desktop-shell"
   copy_tracked_files "$PLUGIN_ROOT" "$SNAPSHOT_ROOT" \
     packages/client/ui-plugin-library \
+    packages/client/ui-skill-library \
     desktop-shell
   copy_tracked_files "$SOURCE_ROOT" "$SNAPSHOT_ROOT" \
     packages/client/ui-plugin-library/package.json \
     packages/client/ui-plugin-library/tsconfig.json
+  copy_tracked_files "$PLUGIN_ROOT" "$SNAPSHOT_ROOT" \
+    packages/client/ui-skill-library/package.json \
+    packages/client/ui-skill-library/tsconfig.json
   PLUGIN_LIBRARY_VERSION=$(node -p "require('$PLUGIN_ROOT/packages/client/ui-plugin-library/package.json').version")
   node - "$SNAPSHOT_ROOT/packages/client/ui-plugin-library/package.json" "$PLUGIN_LIBRARY_VERSION" <<'NODE'
+const fs = require('node:fs')
+const [manifestPath, version] = process.argv.slice(2)
+const manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf8'))
+manifest.version = version
+fs.writeFileSync(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`)
+NODE
+  SKILL_LIBRARY_VERSION=$(node -p "require('$PLUGIN_ROOT/packages/client/ui-skill-library/package.json').version")
+  node - "$SNAPSHOT_ROOT/packages/client/ui-skill-library/package.json" "$SKILL_LIBRARY_VERSION" <<'NODE'
 const fs = require('node:fs')
 const [manifestPath, version] = process.argv.slice(2)
 const manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf8'))

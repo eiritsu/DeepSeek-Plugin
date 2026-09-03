@@ -618,7 +618,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNa
           }
         }
       }
-    case "thirdPartyCatalog":
+    case "thirdPartyCatalog", "skillHubCatalog":
       let page = request["page"] as? Int ?? 1
       let pageSize = request["pageSize"] as? Int ?? 12
       let query = request["query"] as? String ?? ""

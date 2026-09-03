@@ -12,8 +12,8 @@
     "llm.model-discovery-enricher",
     "llm.model-input-resolver",
     "llm.model-capacity-resolver",
-    "llm-pi-ai.external-input-resolution",
-    "llm-pi-ai.external-capacity-resolution"
+    "llm-dsh-ai.external-input-resolution",
+    "llm-dsh-ai.external-capacity-resolution"
   ],
   "defaultInstalled": true
 }

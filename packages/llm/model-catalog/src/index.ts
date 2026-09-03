@@ -1,7 +1,7 @@
 /**
- * Dynamic model-discovery and capacity enrichment backed by models.dev with a
- * persisted last-good snapshot and the installed pi-ai catalog as its offline
- * fallback.
+ * Dynamic model-discovery and model-metadata enrichment backed by models.dev
+ * with a persisted last-good snapshot and the installed pi-ai catalog as its
+ * offline fallback.
  * Exact provider/model declarations or exact-id shared capabilities are
  * required; route names, wire protocols, and model-name patterns are never
  * capability evidence.
@@ -19,9 +19,11 @@ import type { DomainGlobal } from '@deepseek-ai/dsh-storage-domain'
 import type {
   LegacyModelModality,
   LlmModelCapacity,
+  LlmModelReasoningInfo,
   LlmModelMetadataPatch,
   ModelModality,
 } from '@deepseek-ai/dsh-llm'
+import { ReasoningEffortId } from '@deepseek-ai/dsh-llm'
 
 /** Default dynamic catalog endpoint used by Hermes/pi model generation. */
 export const DEFAULT_CATALOG_URL = 'https://models.dev/api.json'
@@ -59,9 +61,13 @@ const declarationSchema = z.object({
   input: z.array(modalitySchema).min(1).optional(),
   contextWindow: z.number().int().positive().optional(),
   maxOutputTokens: z.number().int().positive().optional(),
+  reasoningEfforts: z.array(z.string().min(1)).min(1).optional(),
+  upstream: z.record(z.string(), z.unknown()).optional(),
 }).refine(declaration => declaration.input !== undefined
   || declaration.contextWindow !== undefined
-  || declaration.maxOutputTokens !== undefined, {
+  || declaration.maxOutputTokens !== undefined
+  || declaration.reasoningEfforts !== undefined
+  || declaration.upstream !== undefined, {
   message: 'catalog declaration must contain supported metadata',
 })
 const providerSchema = z.object({
@@ -69,7 +75,7 @@ const providerSchema = z.object({
   api: z.string().min(1).optional(),
 })
 const catalogCacheSchema = z.object({
-  format: z.union([z.literal(1), z.literal(2)]).optional(),
+  format: z.union([z.literal(1), z.literal(2), z.literal(3)]).optional(),
   checkedAt: z.number().int().nonnegative(),
   providers: z.array(providerSchema).optional(),
   declarations: z.array(declarationSchema),
@@ -78,6 +84,30 @@ type CatalogDeclaration = z.infer<typeof declarationSchema>
 type CatalogCache = z.infer<typeof catalogCacheSchema>
 type CatalogProvider = z.infer<typeof providerSchema>
 type CatalogModality = z.infer<typeof modalitySchema>
+
+const reasoningLevelOrder = ['off', 'low', 'medium', 'high', 'xhigh', 'max'] as const
+const reasoningLevelSet = new Set<string>(reasoningLevelOrder)
+
+/** Compare two canonical, ordered model-effort lists. */
+function sameReasoningEfforts(left: readonly string[], right: readonly string[]): boolean {
+  return left.length === right.length && left.every((value, index) => value === right[index])
+}
+
+/** Extract supported effort names from models.dev's reasoning_options field. */
+function supportedReasoningEfforts(value: unknown): string[] | undefined {
+  if (!Array.isArray(value)) return undefined
+  const values = new Set<string>()
+  for (const option of value) {
+    if (typeof option !== 'object' || option === null || Array.isArray(option)) continue
+    const candidate = option as { type?: unknown; values?: unknown }
+    if (candidate.type !== 'effort' || !Array.isArray(candidate.values)) continue
+    for (const effort of candidate.values) {
+      if (typeof effort === 'string' && reasoningLevelSet.has(effort)) values.add(effort)
+    }
+  }
+  const ordered = reasoningLevelOrder.filter(level => values.has(level))
+  return ordered.length === 0 ? undefined : [...ordered]
+}
 
 interface CatalogModelRef {
   id: string
@@ -90,7 +120,7 @@ const catalogDomainSpec = defineDomain({
   version: 0,
   global: {
     schema: catalogCacheSchema,
-    initial: { format: 2 as const, checkedAt: 0, providers: [], declarations: [] },
+    initial: { format: 3 as const, checkedAt: 0, providers: [], declarations: [] },
   },
   tables: {},
 })
@@ -102,6 +132,7 @@ interface CatalogMetadata extends LlmModelCapacity {
   input?: readonly LegacyModelModality[]
   contextWindow?: number
   maxOutputTokens?: number
+  reasoningEfforts?: readonly string[]
 }
 
 type CatalogResolution<T> = { covered: false } | { covered: true; value: T | undefined }
@@ -177,15 +208,18 @@ function parseCatalog(value: unknown): {
       const limit = (rawModel as { limit?: { context?: unknown; output?: unknown } }).limit
       const contextWindow = supportedCapacity(limit?.context)
       const maxOutputTokens = supportedCapacity(limit?.output)
-      if (input !== undefined || contextWindow !== undefined || maxOutputTokens !== undefined) {
-        declarations.push({
-          provider,
-          id,
-          ...input === undefined ? {} : { input },
-          ...contextWindow === undefined ? {} : { contextWindow },
-          ...maxOutputTokens === undefined ? {} : { maxOutputTokens },
-        })
-      }
+      const reasoningEfforts = supportedReasoningEfforts(
+        (rawModel as { reasoning_options?: unknown }).reasoning_options,
+      )
+      declarations.push({
+        provider,
+        id,
+        ...input === undefined ? {} : { input },
+        ...contextWindow === undefined ? {} : { contextWindow },
+        ...maxOutputTokens === undefined ? {} : { maxOutputTokens },
+        ...reasoningEfforts === undefined ? {} : { reasoningEfforts },
+        upstream: { ...rawModel as Record<string, unknown> },
+      })
     }
   }
   return { providers, declarations }
@@ -228,7 +262,7 @@ class DynamicCatalog {
     private readonly config: Required<Config>,
   ) {
     const persisted = global.get()
-    this.cache = persisted.format === 2
+    this.cache = persisted.format === 3
       ? persisted
       : { ...persisted, checkedAt: 0, providers: persisted.providers ?? [] }
   }
@@ -263,14 +297,23 @@ class DynamicCatalog {
       candidate => candidate.maxOutputTokens,
       (left, right) => left === right,
     )
+    const reasoningEfforts = this.resolveField(
+      remote,
+      owners,
+      candidate => candidate.reasoningEfforts,
+      sameReasoningEfforts,
+    )
     const builtin = this.builtin(model, owners)
     const resolvedInput = input.covered ? supportedModalities(input.value) : builtin.input
     const resolvedContextWindow = contextWindow.covered ? contextWindow.value : builtin.contextWindow
     const resolvedMaxOutputTokens = maxOutputTokens.covered ? maxOutputTokens.value : builtin.maxOutputTokens
+    const resolvedReasoningEfforts = reasoningEfforts.covered
+      ? reasoningEfforts.value : builtin.reasoningEfforts
     return {
       ...resolvedInput === undefined ? {} : { input: resolvedInput },
       ...resolvedContextWindow === undefined ? {} : { contextWindow: resolvedContextWindow },
       ...resolvedMaxOutputTokens === undefined ? {} : { maxOutputTokens: resolvedMaxOutputTokens },
+      ...resolvedReasoningEfforts === undefined ? {} : { reasoningEfforts: resolvedReasoningEfforts },
     }
   }
 
@@ -318,7 +361,7 @@ class DynamicCatalog {
     const { providers, declarations } = parseCatalog(
       await readBoundedJson(response, this.config.maxResponseBytes),
     )
-    const cache = { format: 2 as const, checkedAt: Date.now(), providers, declarations }
+    const cache = { format: 3 as const, checkedAt: Date.now(), providers, declarations }
     await this.global.set(cache)
     this.cache = cache
   }
@@ -392,6 +435,17 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
     const currentInput = resolved.input?.filter(
       (modality): modality is ModelModality => modality === 'text' || modality === 'image',
     )
+    const currentReasoning = resolved.reasoningEfforts === undefined
+      ? undefined
+      : {
+          efforts: [
+            { id: ReasoningEffortId('off'), name: 'Off' },
+            ...resolved.reasoningEfforts.map(level => ({
+              id: ReasoningEffortId(level),
+              name: `${level.charAt(0).toUpperCase()}${level.slice(1)}`,
+            })),
+          ],
+        } satisfies LlmModelReasoningInfo
     const patch: LlmModelMetadataPatch = {
       ...metadata.inputModalities === undefined && currentInput !== undefined
         ? { inputModalities: currentInput } : {},
@@ -399,6 +453,8 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
         ? { contextWindow: resolved.contextWindow } : {},
       ...metadata.defaultMaxTokens === undefined && resolved.maxOutputTokens !== undefined
         ? { maxTokens: resolved.maxOutputTokens } : {},
+      ...currentReasoning !== undefined
+        ? { reasoning: currentReasoning } : {},
     }
     return Object.keys(patch).length === 0 ? undefined : patch
   })

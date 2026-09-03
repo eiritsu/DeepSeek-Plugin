@@ -543,26 +543,22 @@ private func createSourceArchive(from source: URL, at archive: URL) throws {
   let requestedURL = LockedBox<URL?>(nil)
   let response = """
   {
-    "page": 3,
-    "limit": 1,
     "total": 271,
-    "totalPages": 271,
-    "catalogTotal": 9222,
-    "categories": [{"id":"memory","en":"Memory","zh":"记忆","count":271}],
-    "plugins": [{
-      "id":"MemTensor/MemOS/apps/memos-local-plugin",
-      "name":"memos-local-plugin",
-      "owner":"MemTensor",
-      "url":"https://github.com/MemTensor/MemOS",
-      "repository":"MemOS",
-      "category":"memory",
-      "description":{"en":"Persistent memory.","zh":"持久记忆。"},
+    "items": [{
+      "fullName":"MemTensor/MemOS",
+      "repositoryUrl":"https://github.com/MemTensor/MemOS",
+      "description":"Persistent memory.",
+      "categoryKey":"memory",
       "stars":10930
     }]
   }
   """
+  let categories = #"{"items":[{"key":"memory","displayName":"Memory"}]}"#
   let client = PluginCatalogClient { url in
-    requestedURL.set(url)
+    if requestedURL.get() == nil { requestedURL.set(url) }
+    if url.path == "/api/v1/plugins/categories" {
+      return PluginHTTPPayload(status: 200, data: Data(categories.utf8))
+    }
     return PluginHTTPPayload(status: 200, data: Data(response.utf8))
   }
   let page = try client.thirdPartyCatalog(
@@ -579,46 +575,33 @@ private func createSourceArchive(from source: URL, at archive: URL) throws {
   #expect(page.plugins.count == 1)
   #expect(page.plugins[0].repository == "MemTensor/MemOS")
   #expect(page.plugins[0].categoryID == "memory")
-  #expect(page.plugins[0].chineseDescription == "持久记忆。")
-  #expect(page.catalogTotal == 9_222)
-  #expect(page.categories[0].chineseName == "记忆")
+  #expect(page.plugins[0].chineseDescription == "Persistent memory.")
+  #expect(page.catalogTotal == 271)
+  #expect(page.categories[0].chineseName == "Memory")
   #expect(page.hasMore)
   #expect(queryItems["page"] == "3")
-  #expect(queryItems["limit"] == "1")
+  #expect(queryItems["page_size"] == "1")
   #expect(queryItems["q"] == "memory")
   #expect(queryItems["category"] == "memory")
   #expect(queryItems["sort"] == "active")
 }
 
-@Test func thirdPartyReviewResolvesAnExactNPMVersionBeforeInspection() async throws {
-  let catalogJSON = """
-  {
-    "page":1,"limit":12,"total":1,"totalPages":1,"catalogTotal":9222,
-    "categories":[{"id":"tools","en":"Tools & Capabilities","zh":"工具与能力","count":2841}],
-    "plugins":[{
-      "id":"owner/repository/packages/plugin","name":"plugin","owner":"owner",
-      "url":"https://github.com/owner/repository","repository":"repository","category":"tools",
-      "description":{"en":"Fixture.","zh":"Fixture."},"stars":7
-    }]
-  }
-  """
+@Test func skillHubPluginReviewPinsRepositoryBeforeInspection() async throws {
+  let catalogJSON = #"{"total":1,"items":[{"fullName":"owner/repository","repositoryUrl":"https://github.com/owner/repository","description":"Fixture.","categoryKey":"tools","stars":7}]}"#
   let manifest = #"{"name":"@fixture/plugin","dsh":{"bundle":{"patch":"./dsh/cordis.patch.yml"}},"dependencies":{"@fixture/events":"workspace:*"}}"#
   let client = PluginCatalogClient { url in
     switch (url.host, url.path) {
-    case ("deepseek1024.com", "/api/v2/plugins"):
+    case ("api.skillhub.cn", "/api/v1/plugins"):
       return PluginHTTPPayload(status: 200, data: Data(catalogJSON.utf8))
-    case ("deepseek1024.com", "/plugins/owner/repository/packages/plugin"):
-      return PluginHTTPPayload(
-        status: 200,
-        data: Data("<code>dsh plugin --profile web add @fixture/plugin</code>".utf8)
-      )
-    case ("registry.npmjs.org", "/@fixture%2Fplugin/latest"),
-         ("registry.npmjs.org", "/@fixture/plugin/latest"):
-      return PluginHTTPPayload(status: 200, data: Data(#"{"version":"1.2.3"}"#.utf8))
-    case ("registry.npmjs.org", "/@fixture%2Fplugin/1.2.3"),
-         ("registry.npmjs.org", "/@fixture/plugin/1.2.3"):
+    case ("api.skillhub.cn", "/api/v1/plugins/categories"):
+      return PluginHTTPPayload(status: 200, data: Data(#"{"items":[]}"#.utf8))
+    case ("api.github.com", let path) where path.contains("/repos/owner/repository") && path.contains("/commits/"):
+      return PluginHTTPPayload(status: 200, data: Data(#"{"sha":"0123456789abcdef0123456789abcdef01234567"}"#.utf8))
+    case ("api.github.com", let path) where path.contains("/repos/owner/repository"):
+      return PluginHTTPPayload(status: 200, data: Data(#"{"default_branch":"main"}"#.utf8))
+    case ("raw.githubusercontent.com", "/owner/repository/0123456789abcdef0123456789abcdef01234567/package.json"):
       return PluginHTTPPayload(status: 200, data: Data(manifest.utf8))
-    case ("unpkg.com", "/@fixture/plugin@1.2.3/dsh/cordis.patch.yml"):
+    case ("raw.githubusercontent.com", "/owner/repository/0123456789abcdef0123456789abcdef01234567/dsh/cordis.patch.yml"):
       return PluginHTTPPayload(status: 200, data: Data("plugins: []".utf8))
     default:
       return PluginHTTPPayload(status: 404, data: Data())
@@ -640,12 +623,11 @@ private func createSourceArchive(from source: URL, at archive: URL) throws {
     manager.reviewThirdParty(id: catalog.plugins[0].id) { continuation.resume(with: $0) }
   }
 
-  #expect(report.source == "@fixture/plugin@1.2.3")
+  #expect(report.source.hasPrefix("https://github.com/owner/repository.git#"))
   #expect(report.category == .profileBundle)
   #expect(report.installable)
-  #expect(report.requiresForceInstall)
-  #expect(report.risks.count == 1)
-  #expect(report.risks[0].contains("@fixture/events"))
+  #expect(!report.requiresForceInstall)
+  #expect(report.risks.isEmpty)
   #expect(report.reviewID != nil)
 
   let reviewID = try #require(report.reviewID)
@@ -657,12 +639,7 @@ private func createSourceArchive(from source: URL, at archive: URL) throws {
       progress: { _ in }
     ) { continuation.resume(returning: $0) }
   }
-  switch denied {
-  case .success:
-    Issue.record("risk-bearing review must require explicit force installation")
-  case let .failure(error):
-    #expect(error.localizedDescription.contains("强制安装"))
-  }
+  if case .success = denied { Issue.record("install should require the CLI fixture") }
 
   let cancelled = await withCheckedContinuation { continuation in
     manager.cancelReview(reviewID: reviewID) { continuation.resume(returning: $0) }

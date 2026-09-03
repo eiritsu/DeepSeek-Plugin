@@ -9,7 +9,7 @@ import { Context } from '@deepseek-ai/cordis'
 import Loader from '@deepseek-ai/cordis-plugin-loader'
 import Include from '@deepseek-ai/cordis-plugin-include'
 import LlmRuntime from '@deepseek-ai/dsh-llm'
-import * as LlmPiAi from '@deepseek-ai/dsh-llm-pi-ai'
+import * as LlmPiAi from '@deepseek-ai/dsh-llm-dsh-ai'
 import Storage from '@deepseek-ai/dsh-storage'
 import * as StorageJson from '@deepseek-ai/dsh-storage-json'
 import * as StorageDomain from '@deepseek-ai/dsh-storage-domain'
@@ -116,7 +116,7 @@ describe('model-catalog real Loader composition', () => {
       '- id: llm',
       "  name: 'test-llm-service'",
       '- id: pi-ai',
-      "  name: 'test-llm-pi-ai'",
+      "  name: 'test-llm-dsh-ai'",
       '  config:',
       '    providers:',
       '      a6:',
@@ -177,7 +177,7 @@ describe('model-catalog real Loader composition', () => {
     ctx.loader.builtins.include = Include
     const modules = new Map<string, unknown>([
       ['test-llm-service', LlmRuntime],
-      ['test-llm-pi-ai', LlmPiAi],
+      ['test-llm-dsh-ai', LlmPiAi],
       ['test-storage', Storage],
       ['test-storage-json', StorageJson],
       ['test-storage-domain', StorageDomain],

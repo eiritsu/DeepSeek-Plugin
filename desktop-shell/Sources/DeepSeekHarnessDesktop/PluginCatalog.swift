@@ -119,38 +119,6 @@ final class PluginCatalogClient: @unchecked Sendable {
     let version: String
   }
 
-  private struct ThirdPartyCatalogResponse: Decodable {
-    let page: Int
-    let total: Int
-    let totalPages: Int
-    let catalogTotal: Int
-    let categories: [ThirdPartyCategory]
-    let plugins: [ThirdPartyPlugin]
-  }
-
-  private struct ThirdPartyCategory: Decodable {
-    let id: String
-    let en: String
-    let zh: String
-    let count: Int
-  }
-
-  private struct ThirdPartyDescription: Decodable {
-    let en: String
-    let zh: String
-  }
-
-  private struct ThirdPartyPlugin: Decodable {
-    let id: String
-    let name: String
-    let owner: String
-    let url: String
-    let repository: String
-    let category: String
-    let description: ThirdPartyDescription
-    let stars: Int?
-  }
-
   private let fetch: Fetch
 
   init(fetch: @escaping Fetch = PluginCatalogClient.fetchRemote) {
@@ -233,10 +201,10 @@ final class PluginCatalogClient: @unchecked Sendable {
     let normalizedCategory = String(category.lowercased().prefix(32))
     let supportedSorts = Set(["stars", "npmDownloads7d", "installs", "newest", "active"])
     let normalizedSort = supportedSorts.contains(sort) ? sort : "stars"
-    var components = URLComponents(string: "https://deepseek1024.com/api/v2/plugins")!
+    var components = URLComponents(string: "https://api.skillhub.cn/api/v1/plugins")!
     components.queryItems = [
       URLQueryItem(name: "page", value: String(safePage)),
-      URLQueryItem(name: "limit", value: String(safePageSize)),
+      URLQueryItem(name: "page_size", value: String(safePageSize)),
       URLQueryItem(name: "sort", value: normalizedSort),
     ]
     if !normalizedQuery.isEmpty {
@@ -247,63 +215,77 @@ final class PluginCatalogClient: @unchecked Sendable {
     }
     let response = try fetch(components.url!)
     guard response.status == 200 else {
-      throw DesktopError.message("第三方社区返回 HTTP \(response.status)，暂时无法读取目录。")
+      throw DesktopError.message("SkillHub 插件市场返回 HTTP \(response.status)，暂时无法读取目录。")
     }
-    let decoded: ThirdPartyCatalogResponse
-    do {
-      decoded = try JSONDecoder().decode(ThirdPartyCatalogResponse.self, from: response.data)
-    } catch {
-      throw DesktopError.message("第三方社区目录响应格式无效。")
+    guard let root = try? JSONSerialization.jsonObject(with: response.data) as? [String: Any] else {
+      throw DesktopError.message("SkillHub 插件市场响应格式无效。")
     }
-    let plugins = decoded.plugins.map { plugin in
-      DesktopThirdPartyPlugin(
-        id: plugin.id,
-        name: plugin.name,
-        repository: "\(plugin.owner)/\(plugin.repository)",
-        englishDescription: plugin.description.en,
-        chineseDescription: plugin.description.zh,
-        stars: plugin.stars ?? 0,
-        categoryID: plugin.category,
-        detailURL: "https://deepseek1024.com/plugins/\(plugin.id)",
-        repositoryURL: plugin.url
+    let items = root["items"] as? [[String: Any]] ?? []
+    let plugins = items.compactMap { plugin -> DesktopThirdPartyPlugin? in
+      guard let fullName = plugin["fullName"] as? String, Self.isRepositoryName(fullName) else { return nil }
+      let repositoryURL = plugin["repositoryUrl"] as? String ?? "https://github.com/\(fullName)"
+      let description = plugin["description"] as? String ?? ""
+      let stars = plugin["stars"] as? Int ?? 0
+      let category = plugin["categoryKey"] as? String ?? ""
+      return DesktopThirdPartyPlugin(
+        id: fullName,
+        name: fullName,
+        repository: fullName,
+        englishDescription: description,
+        chineseDescription: description,
+        stars: stars,
+        categoryID: category,
+        detailURL: repositoryURL,
+        repositoryURL: repositoryURL
       )
+    }
+    let reportedTotal = root["total"] as? Int
+    let total = reportedTotal ?? (safePage - 1) * safePageSize + plugins.count
+    let categories = (try? skillHubCategories()) ?? []
+    let hasMore: Bool
+    if let reportedTotal {
+      hasMore = safePage * safePageSize < reportedTotal
+    } else {
+      hasMore = plugins.count >= safePageSize
     }
     return DesktopThirdPartyCatalogPage(
       plugins: plugins,
-      hasMore: decoded.page < decoded.totalPages,
-      total: decoded.total,
-      catalogTotal: decoded.catalogTotal,
-      categories: decoded.categories.map {
-        DesktopThirdPartyCategory(id: $0.id, englishName: $0.en, chineseName: $0.zh, count: $0.count)
-      }
+      hasMore: hasMore,
+      total: total,
+      catalogTotal: total,
+      categories: categories
     )
   }
 
+  private func skillHubCategories() throws -> [DesktopThirdPartyCategory] {
+    let response = try fetch(requireURL("https://api.skillhub.cn/api/v1/plugins/categories"))
+    guard response.status == 200,
+          let root = try? JSONSerialization.jsonObject(with: response.data) as? [String: Any],
+          let items = root["items"] as? [[String: Any]]
+    else { return [] }
+    return items.compactMap { item in
+      guard let id = item["key"] as? String else { return nil }
+      let name = item["displayName"] as? String ?? id
+      return DesktopThirdPartyCategory(id: id, englishName: name, chineseName: name, count: 0)
+    }
+  }
+
+  private static func isRepositoryName(_ value: String) -> Bool {
+    let parts = value.split(separator: "/", omittingEmptySubsequences: false).map(String.init)
+    guard parts.count == 2 else { return false }
+    return parts.allSatisfy { $0.range(of: "^[A-Za-z0-9][A-Za-z0-9._-]*$", options: .regularExpression) != nil }
+  }
+
   func resolveThirdPartySource(plugin: DesktopThirdPartyPlugin) throws -> String {
-    guard let detailURL = URL(string: plugin.detailURL),
-          detailURL.scheme == "https",
-          detailURL.host == "deepseek1024.com",
-          detailURL.path.hasPrefix("/plugins/")
+    guard let repositoryURL = URL(string: plugin.repositoryURL),
+          repositoryURL.scheme == "https",
+          repositoryURL.host == "github.com",
+          Self.isRepositoryName(plugin.repository)
     else {
-      throw DesktopError.message("第三方社区详情地址无效。")
+      throw DesktopError.message("SkillHub 插件条目没有有效的 GitHub 仓库地址。")
     }
-    let detail = try fetch(detailURL)
-    guard detail.status == 200, let html = String(data: detail.data, encoding: .utf8) else {
-      throw DesktopError.message("第三方社区详情不可读，未生成安装来源。")
-    }
-    let pattern = #"dsh\s+plugin\s+--profile\s+web\s+add\s+([^<\s\"']+)"#
-    guard let match = Self.firstMatch(pattern, in: html), match.count > 1 else {
-      throw DesktopError.message("第三方条目没有可验证的 DSH npm 安装目标；请打开详情后手动检查来源。")
-    }
-    let candidate = Self.htmlText(match[1])
-    let exactPattern = "^(?:@[a-z0-9][a-z0-9._-]*/)?[a-z0-9][a-z0-9._-]*@[0-9]+\\.[0-9]+\\.[0-9]+(?:-[0-9A-Za-z.-]+)?$"
-    if candidate.range(of: exactPattern, options: [.regularExpression, .caseInsensitive]) != nil {
-      return candidate
-    }
-    guard Self.isNPMName(candidate) else {
-      throw DesktopError.message("第三方条目的安装目标不是受支持的 npm package，未生成安装来源。")
-    }
-    return "\(candidate)@\(try latestNPMVersion(package: candidate))"
+    let commit = try resolveHead(repository: plugin.repository, defaultBranch: nil)
+    return "https://github.com/\(plugin.repository)#\(commit)"
   }
 
   func latestNPMVersion(package: String) throws -> String {

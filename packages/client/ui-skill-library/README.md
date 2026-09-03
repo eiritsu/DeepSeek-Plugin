@@ -1,0 +1,3 @@
+# @deepseek-ai/dsh-client-ui-skill-library
+
+Desktop-only SkillHub marketplace. The package contributes a separate `技能库` sidebar action above the plugin library and a shell overlay with Installed, Review & install, Community discovery, and Operation log tabs. Community discovery maps the SkillHub skill endpoint with sort tabs, source/scene/API Key filters, full-width search, single-column result rows, internal scrolling, near-bottom prefetch, and explicit previous/next controls. Cards link to the public SkillHub page and download the SkillHub ZIP; installation into a local skill root remains a follow-up native capability.

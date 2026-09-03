@@ -27,7 +27,7 @@ overrides:
   '@deepseek-ai/dsh-invariants': 'link:../DeepSeek Harness/packages/runtime-diagnostics/invariants'
   '@deepseek-ai/dsh-home-paths': 'link:../DeepSeek Harness/packages/util/home-paths'
   '@deepseek-ai/dsh-llm': 'link:../DeepSeek Harness/packages/llm/llm'
-  '@deepseek-ai/dsh-llm-pi-ai': 'link:../DeepSeek Harness/packages/llm/llm-pi-ai'
+  '@deepseek-ai/dsh-llm-dsh-ai': 'link:../DeepSeek Harness/packages/llm/llm-dsh-ai'
   '@deepseek-ai/dsh-settings': 'link:../DeepSeek Harness/packages/settings/settings'
   '@deepseek-ai/dsh-session': 'link:../DeepSeek Harness/packages/core/session'
   '@deepseek-ai/dsh-session-persistence': 'link:../DeepSeek Harness/packages/session/session-persistence'

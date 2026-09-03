@@ -7,7 +7,8 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import * as yaml from 'js-yaml'
 import { Context } from '@deepseek-ai/cordis'
 import { entryListSchema } from '@deepseek-ai/cordis-plugin-include'
-import LlmRuntime from '@deepseek-ai/dsh-llm'
+import LlmRuntime, { LlmAdapter } from '@deepseek-ai/dsh-llm'
+import type { GenerateOptions, LlmResolvedModelInfo, StreamChunk } from '@deepseek-ai/dsh-llm'
 import Storage from '@deepseek-ai/dsh-storage'
 import * as StorageJson from '@deepseek-ai/dsh-storage-json'
 import * as StorageDomain from '@deepseek-ai/dsh-storage-domain'
@@ -33,6 +34,45 @@ async function mountRuntime(ctx: Context): Promise<void> {
 }
 
 describe('pi-ai model-discovery catalog', () => {
+  it('enriches exact model reasoning levels from the upstream catalog', async () => {
+    const ctx = new Context()
+    context = ctx
+    await mountRuntime(ctx)
+    vi.stubGlobal('fetch', vi.fn(() => Promise.resolve(new Response(JSON.stringify({
+      amd: {
+        api: 'https://developer.amd.com.cn/radeon/api/v1',
+        models: {
+          'Qwen3.8-Flash-Next': {
+            reasoning: true,
+            reasoning_options: [{ type: 'effort', values: ['low', 'medium', 'xhigh'] }],
+          },
+        },
+      },
+    })))))
+    class Adapter extends LlmAdapter {
+      override resolveModel(provider: string, model: string): Promise<LlmResolvedModelInfo> {
+        return Promise.resolve({ provider, id: model, name: model })
+      }
+
+      override async *stream(_options: GenerateOptions): AsyncIterable<StreamChunk> {
+        yield { type: 'finish', reason: { kind: 'stop' } }
+      }
+    }
+    ctx.llm.registerAdapter(['amd'], new Adapter())
+    await ctx.plugin(ModelCatalogPiAi, { refreshIntervalMs: 60_000 })
+
+    await expect(ctx.llm.resolveModelInfo('amd', 'Qwen3.8-Flash-Next')).resolves.toMatchObject({
+      reasoning: {
+        efforts: [
+          { id: 'off', name: 'Off' },
+          { id: 'low', name: 'Low' },
+          { id: 'medium', name: 'Medium' },
+          { id: 'xhigh', name: 'Xhigh' },
+        ],
+      },
+    })
+  })
+
   it('uses exact owners or exact-id consensus and withdraws enrichment on disposal', async () => {
     const ctx = new Context()
     context = ctx
@@ -41,6 +81,8 @@ describe('pi-ai model-discovery catalog', () => {
       xai: { models: { 'grok-4.6': {
         modalities: { input: ['text', 'image', 'audio', 'video', 'pdf'] },
         limit: { context: 1_000_000, output: 131_072 },
+        reasoning: true,
+        reasoning_options: [{ type: 'effort', values: ['low', 'medium', 'xhigh'] }],
       } } },
       gateway: { models: { 'grok-4.6': {
         modalities: { input: ['pdf', 'video', 'audio', 'image', 'text'] },
@@ -142,6 +184,14 @@ describe('pi-ai model-discovery catalog', () => {
     await expect(ctx.llm.resolveModelInput('gateway', 'unknown-model')).resolves.toBeUndefined()
     await expect(ctx.llm.resolveModelCapacity('zai-coding-cn', 'glm-5.3-flash'))
       .resolves.toEqual({ contextWindow: 1_000_000, maxOutputTokens: 131_072 })
+    const persisted = JSON.parse(await readFile(join(storageRoot!, 'model_catalog_pi_ai.json'), 'utf8')) as {
+      global: { declarations: Array<{ provider: string; id: string; reasoningEfforts?: string[]; upstream?: Record<string, unknown> }> }
+    }
+    expect(persisted.global.declarations.find(declaration => declaration.provider === 'xai'
+      && declaration.id === 'grok-4.6')).toMatchObject({
+      reasoningEfforts: ['low', 'medium', 'xhigh'],
+      upstream: { reasoning: true, reasoning_options: [{ type: 'effort', values: ['low', 'medium', 'xhigh'] }] },
+    })
 
     await plugin.dispose()
     await expect(ctx.llm.resolveModelInput('gateway', 'grok-4.6')).resolves.toBeUndefined()
@@ -185,7 +235,7 @@ describe('pi-ai model-discovery catalog', () => {
       global: { format?: number; providers?: unknown[]; declarations: unknown[] }
     }
     expect(persisted.global).toMatchObject({
-      format: 2,
+      format: 3,
       providers: [{ id: 'zai' }],
       declarations: [{
         provider: 'zai',

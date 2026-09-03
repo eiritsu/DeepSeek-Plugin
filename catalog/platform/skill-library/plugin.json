@@ -1,0 +1,11 @@
+{
+  "id": "@deepseek-ai/dsh-client-ui-skill-library",
+  "displayName": "Skill Library",
+  "category": "platform",
+  "version": "0.1.0-alpha.1",
+  "sourcePackages": ["packages/client/ui-skill-library"],
+  "integrationMode": "desktop-assisted-marketplace",
+  "desktopBridge": "desktop-shell/Sources/DeepSeekHarnessDesktop/DesktopPluginBridge.swift",
+  "artifactPattern": "deepseek-ai-dsh-client-ui-skill-library-*.tgz",
+  "defaultInstalled": true
+}

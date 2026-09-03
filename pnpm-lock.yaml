@@ -27,7 +27,7 @@ overrides:
   '@deepseek-ai/dsh-invariants': link:../DeepSeek Harness/packages/runtime-diagnostics/invariants
   '@deepseek-ai/dsh-home-paths': link:../DeepSeek Harness/packages/util/home-paths
   '@deepseek-ai/dsh-llm': link:../DeepSeek Harness/packages/llm/llm
-  '@deepseek-ai/dsh-llm-pi-ai': link:../DeepSeek Harness/packages/llm/llm-pi-ai
+  '@deepseek-ai/dsh-llm-dsh-ai': link:../DeepSeek Harness/packages/llm/llm-dsh-ai
   '@deepseek-ai/dsh-settings': link:../DeepSeek Harness/packages/settings/settings
   '@deepseek-ai/dsh-session': link:../DeepSeek Harness/packages/core/session
   '@deepseek-ai/dsh-session-persistence': link:../DeepSeek Harness/packages/session/session-persistence
@@ -241,6 +241,46 @@ importers:
         specifier: ^18.2.0
         version: 18.2.0(react@18.2.0)
 
+  packages/client/ui-skill-library:
+    dependencies:
+      '@deepseek-ai/cordis':
+        specifier: link:../../../../DeepSeek Harness/vendor/cordis
+        version: link:../../../../DeepSeek Harness/vendor/cordis
+      '@deepseek-ai/dsh-client-locale':
+        specifier: link:../../../../DeepSeek Harness/packages/client/locale
+        version: link:../../../../DeepSeek Harness/packages/client/locale
+      '@deepseek-ai/dsh-client-runtime':
+        specifier: link:../../../../DeepSeek Harness/packages/client/runtime
+        version: link:../../../../DeepSeek Harness/packages/client/runtime
+      '@deepseek-ai/dsh-client-ui-layout':
+        specifier: link:../../../../DeepSeek Harness/packages/client/ui-layout
+        version: link:../../../../DeepSeek Harness/packages/client/ui-layout
+      '@deepseek-ai/dsh-client-ui-sidebar':
+        specifier: link:../../../../DeepSeek Harness/packages/client/ui-sidebar
+        version: link:../../../../DeepSeek Harness/packages/client/ui-sidebar
+      '@deepseek-ai/dsh-invariants':
+        specifier: link:../../../../DeepSeek Harness/packages/runtime-diagnostics/invariants
+        version: link:../../../../DeepSeek Harness/packages/runtime-diagnostics/invariants
+    devDependencies:
+      '@deepseek-ai/dsh-client-ui-primitives':
+        specifier: link:../../../../DeepSeek Harness/packages/client/ui-primitives
+        version: link:../../../../DeepSeek Harness/packages/client/ui-primitives
+      '@deepseek-ai/dsh-client-ui-renderer':
+        specifier: link:../../../../DeepSeek Harness/packages/client/ui-renderer
+        version: link:../../../../DeepSeek Harness/packages/client/ui-renderer
+      '@deepseek-ai/dsh-client-ui-slots':
+        specifier: link:../../../../DeepSeek Harness/packages/client/ui-slots
+        version: link:../../../../DeepSeek Harness/packages/client/ui-slots
+      '@types/react':
+        specifier: ~18.3.1
+        version: 18.3.31
+      react:
+        specifier: ^18.2.0
+        version: 18.2.0
+      react-dom:
+        specifier: ^18.2.0
+        version: 18.2.0(react@18.2.0)
+
   packages/lark/lark:
     dependencies:
       '@deepseek-ai/cordis':
@@ -331,9 +371,9 @@ importers:
       '@deepseek-ai/cordis-plugin-loader':
         specifier: link:../../../../DeepSeek Harness/vendor/loader
         version: link:../../../../DeepSeek Harness/vendor/loader
-      '@deepseek-ai/dsh-llm-pi-ai':
-        specifier: link:../../../../DeepSeek Harness/packages/llm/llm-pi-ai
-        version: link:../../../../DeepSeek Harness/packages/llm/llm-pi-ai
+      '@deepseek-ai/dsh-llm-dsh-ai':
+        specifier: link:../../../../DeepSeek Harness/packages/llm/llm-dsh-ai
+        version: link:../../../../DeepSeek Harness/packages/llm/llm-dsh-ai
       '@deepseek-ai/dsh-storage':
         specifier: link:../../../../DeepSeek Harness/packages/storage/storage
         version: link:../../../../DeepSeek Harness/packages/storage/storage

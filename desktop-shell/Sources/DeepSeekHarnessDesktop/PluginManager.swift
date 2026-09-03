@@ -426,7 +426,7 @@ final class PluginManager: @unchecked Sendable {
     queue.async {
       do {
         guard let plugin = self.thirdPartyPluginsByID[id] else {
-          throw DesktopError.message("第三方目录条目已过期，请刷新目录后重试。")
+          throw DesktopError.message("SkillHub 插件条目已过期，请刷新目录后重试。")
         }
         let source = try self.catalogClient.resolveThirdPartySource(plugin: plugin)
         let report = try self.makeReview(source: source)

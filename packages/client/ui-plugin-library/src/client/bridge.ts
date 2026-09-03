@@ -91,6 +91,14 @@ export type PluginBridgeRequest =
     readonly category: string
     readonly sort: ThirdPartySort
   }
+  | {
+    readonly action: 'skillHubCatalog'
+    readonly page: number
+    readonly pageSize: number
+    readonly query: string
+    readonly category: string
+    readonly sort: ThirdPartySort
+  }
   | { readonly action: 'review'; readonly source: string }
   | { readonly action: 'reviewUpdate'; readonly package: string }
   | { readonly action: 'selectDirectory' }
@@ -115,6 +123,7 @@ export interface PluginBridgeReplies {
     readonly catalogTotal: number
     readonly categories: readonly ThirdPartyCategory[]
   }
+  readonly skillHubCatalog: PluginBridgeReplies['thirdPartyCatalog']
   readonly review: { readonly report: PluginReviewReport }
   readonly reviewUpdate: { readonly report: PluginReviewReport }
   readonly selectDirectory: { readonly path?: string }
