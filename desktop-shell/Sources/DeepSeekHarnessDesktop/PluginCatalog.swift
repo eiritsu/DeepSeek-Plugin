@@ -266,8 +266,24 @@ final class PluginCatalogClient: @unchecked Sendable {
     return items.compactMap { item in
       guard let id = item["key"] as? String else { return nil }
       let name = item["displayName"] as? String ?? id
-      return DesktopThirdPartyCategory(id: id, englishName: name, chineseName: name, count: 0)
+      let count = (try? skillHubCategoryCount(id)) ?? 0
+      return DesktopThirdPartyCategory(id: id, englishName: name, chineseName: name, count: count)
     }
+  }
+
+  private func skillHubCategoryCount(_ id: String) throws -> Int {
+    var components = URLComponents(string: "https://api.skillhub.cn/api/v1/plugins")!
+    components.queryItems = [
+      URLQueryItem(name: "page", value: "1"),
+      URLQueryItem(name: "page_size", value: "1"),
+      URLQueryItem(name: "sort", value: "stars"),
+      URLQueryItem(name: "category", value: id),
+    ]
+    let response = try fetch(components.url!)
+    guard response.status == 200,
+          let root = try? JSONSerialization.jsonObject(with: response.data) as? [String: Any]
+    else { return 0 }
+    return root["total"] as? Int ?? 0
   }
 
   private static func isRepositoryName(_ value: String) -> Bool {
