@@ -458,6 +458,15 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
     }
     return Object.keys(patch).length === 0 ? undefined : patch
   })
+  ctx.llm.registerModelReasoningResolver(async ({ model, ownedBy, baseURL, signal }) => {
+    await catalog.refresh(signal)
+    const metadata = catalog.metadata({
+      id: model,
+      ...ownedBy === undefined ? {} : { ownedBy },
+      ...baseURL === undefined ? {} : { baseURL },
+    })
+    return metadata.reasoningEfforts
+  })
   ctx.llm.registerModelDiscoveryEnricher(async ({ request, models }) => {
     await catalog.refresh(request.signal)
     return models.flatMap((model) => {

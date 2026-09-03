@@ -248,7 +248,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNa
           self.statusLabel.isHidden = true
           self.spinner.isHidden = true
           self.webView.isHidden = false
-          self.webView.load(URLRequest(url: url))
+          self.loadRuntimePage(url)
           if let package = self.recoveredPluginNotice {
             self.recoveredPluginNotice = nil
             self.alert(
@@ -453,7 +453,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNa
   }
 
   @objc private func reload() {
-    if let runtimeURL { webView.load(URLRequest(url: runtimeURL)) }
+    if let runtimeURL { loadRuntimePage(runtimeURL) }
+  }
+
+  private func loadRuntimePage(_ url: URL) {
+    var request = URLRequest(url: url, cachePolicy: .reloadIgnoringLocalAndRemoteCacheData)
+    request.timeoutInterval = 30
+    webView.load(request)
   }
 
   @objc private func openSourceDirectory() {

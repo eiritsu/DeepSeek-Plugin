@@ -71,6 +71,8 @@ describe('pi-ai model-discovery catalog', () => {
         ],
       },
     })
+    await expect(ctx.llm.resolveModelReasoning('amd', 'Qwen3.8-Flash-Next'))
+      .resolves.toEqual(['low', 'medium', 'xhigh'])
   })
 
   it('uses exact owners or exact-id consensus and withdraws enrichment on disposal', async () => {
