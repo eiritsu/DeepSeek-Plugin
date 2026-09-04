@@ -98,6 +98,12 @@ describe('pi-ai model-discovery catalog', () => {
         modalities: { input: ['text', 'image', 'video', 'pdf'] },
         limit: { context: 1_000_000, output: 131_072 },
       } } },
+      'provider-a': { models: { 'shared-vision': {
+        modalities: { input: ['text', 'image', 'pdf'] },
+      } } },
+      'provider-b': { models: { 'shared-vision': {
+        modalities: { input: ['text', 'image'] },
+      } } },
     })))))
     ctx.llm.registerModelDiscovery('llm-example', () => Promise.resolve([
       { id: 'gpt-5.6-luna', ownedBy: 'custom' },
@@ -107,6 +113,7 @@ describe('pi-ai model-discovery catalog', () => {
       { id: 'grok-4.6', ownedBy: 'custom' },
       { id: 'gpt-5.3-codex-spark', ownedBy: 'custom' },
       { id: 'glm-5.3-flash', ownedBy: 'zai-coding-cn' },
+      { id: 'shared-vision' },
     ]))
     ctx.llm.registerModelDiscovery('llm-xai', () => Promise.resolve([
       { id: 'grok-4.6', ownedBy: 'xai' },
@@ -148,6 +155,7 @@ describe('pi-ai model-discovery catalog', () => {
         maxTokens: 131_072,
         inputModalities: ['text', 'image', 'video', 'pdf'],
       },
+      { id: 'shared-vision', inputModalities: ['text', 'image'] },
     ])
     await expect(ctx.llm.discoverModels('llm-xai', { provider: 'gateway' })).resolves.toEqual([
       {
@@ -205,6 +213,7 @@ describe('pi-ai model-discovery catalog', () => {
       { id: 'grok-4.6', ownedBy: 'custom' },
       { id: 'gpt-5.3-codex-spark', ownedBy: 'custom' },
       { id: 'glm-5.3-flash', ownedBy: 'zai-coding-cn' },
+      { id: 'shared-vision' },
     ])
   })
 

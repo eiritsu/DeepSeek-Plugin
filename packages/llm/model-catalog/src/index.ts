@@ -147,6 +147,23 @@ function sameModalities(left: readonly CatalogModality[], right: readonly Catalo
   return left.length === right.length && left.every((value, index) => value === right[index])
 }
 
+/**
+ * Return modalities every matching upstream declaration supports.
+ *
+ * An owner-less gateway model can be listed by several providers with
+ * different optional media (for example one lists PDF and another does not).
+ * Exact-list consensus would discard the shared image capability and make a
+ * multimodal model appear text-only. Intersection preserves only facts all
+ * matching declarations agree on, while still refusing an image claim when
+ * any declaration is text-only.
+ */
+function sharedModalities(values: readonly (readonly CatalogModality[])[]): CatalogModality[] | undefined {
+  const first = values[0]
+  if (first === undefined) return undefined
+  const shared = first.filter(modality => values.every(candidate => candidate.includes(modality)))
+  return shared.length === 0 ? undefined : [...shared]
+}
+
 /** Normalize a models.dev input list to modalities the current LLM request vocabulary accepts. */
 function supportedModalities(value: unknown): LegacyModelModality[] | undefined {
   if (!Array.isArray(value)) return undefined
@@ -284,7 +301,7 @@ class DynamicCatalog {
   metadata(model: CatalogModelRef): CatalogMetadata {
     const remote = this.cache.declarations.filter(candidate => sameModelId(candidate.id, model.id))
     const owners = this.exactOwners(model, remote)
-    const input = this.resolveField(remote, owners, candidate => candidate.input, sameModalities)
+    const input = this.resolveInput(remote, owners)
     const contextWindow = this.resolveField(
       remote,
       owners,
@@ -315,6 +332,20 @@ class DynamicCatalog {
       ...resolvedMaxOutputTokens === undefined ? {} : { maxOutputTokens: resolvedMaxOutputTokens },
       ...resolvedReasoningEfforts === undefined ? {} : { reasoningEfforts: resolvedReasoningEfforts },
     }
+  }
+
+  private resolveInput(
+    declarations: readonly CatalogDeclaration[],
+    owners: readonly string[],
+  ): CatalogResolution<readonly CatalogModality[]> {
+    const candidates = owners.length > 0
+      ? declarations.filter(candidate => owners.includes(candidate.provider))
+      : declarations
+    const values = candidates.map(candidate => candidate.input).filter(
+      (value): value is CatalogModality[] => value !== undefined,
+    )
+    if (values.length === 0) return { covered: false }
+    return { covered: true, value: sharedModalities(values) }
   }
 
   private builtin(model: CatalogModelRef, owners: readonly string[]): CatalogMetadata {
@@ -434,7 +465,7 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
   void catalog.refresh().catch((error: unknown) => {
     ctx.logger.warn('model-catalog: startup refresh failed; using the last good snapshot (%s)', error instanceof Error ? error.message : String(error))
   })
-  ctx.llm.registerModelMetadataEnricher('models.dev', async ({ provider, model, signal }) => {
+  ctx.llm.registerModelMetadataEnricher('models.dev', async ({ provider, model, metadata, signal }) => {
     await catalog.refresh(signal)
     const resolved = catalog.metadata({ id: model, ownedBy: provider })
     const currentInput = resolved.input?.filter(
@@ -453,15 +484,21 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
         } satisfies LlmModelReasoningInfo
     const patch = {
       authoritative: true,
-      ...currentInput === undefined ? {} : { inputModalities: currentInput },
+      // An adapter that already resolved an explicit route capability owns
+      // that declaration. Runtime input resolvers (including dsh-ai) receive
+      // the dynamic catalog before this enrichment, so this only fills an
+      // otherwise unknown adapter result instead of overriding user config.
+      ...currentInput === undefined || metadata.inputModalities !== undefined
+        ? {} : { inputModalities: currentInput },
       ...resolved.contextWindow === undefined ? {} : { contextWindow: resolved.contextWindow },
-      ...resolved.maxOutputTokens === undefined ? {} : { maxTokens: resolved.maxOutputTokens },
+      ...resolved.maxOutputTokens === undefined || metadata.defaultMaxTokens !== undefined
+        ? {} : { maxTokens: resolved.maxOutputTokens },
       ...currentReasoning !== undefined
         ? { reasoning: currentReasoning } : {},
     } as LlmModelMetadataPatch & { authoritative: true }
-    return currentInput === undefined
+    return (currentInput === undefined || metadata.inputModalities !== undefined)
       && resolved.contextWindow === undefined
-      && resolved.maxOutputTokens === undefined
+      && (resolved.maxOutputTokens === undefined || metadata.defaultMaxTokens !== undefined)
       && currentReasoning === undefined
       ? undefined
       : patch
