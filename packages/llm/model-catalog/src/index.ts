@@ -429,7 +429,12 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
     requestTimeoutMs: config.requestTimeoutMs ?? DEFAULT_REQUEST_TIMEOUT_MS,
     maxResponseBytes: config.maxResponseBytes ?? DEFAULT_MAX_RESPONSE_BYTES,
   })
-  ctx.llm.registerModelMetadataEnricher('models.dev', async ({ provider, model, metadata, signal }) => {
+  // Warm the persisted catalog at boot so model metadata is available before
+  // the first model picker or request asks the LLM registry to resolve a model.
+  void catalog.refresh().catch((error: unknown) => {
+    ctx.logger.warn('model-catalog: startup refresh failed; using the last good snapshot (%s)', error instanceof Error ? error.message : String(error))
+  })
+  ctx.llm.registerModelMetadataEnricher('models.dev', async ({ provider, model, signal }) => {
     await catalog.refresh(signal)
     const resolved = catalog.metadata({ id: model, ownedBy: provider })
     const currentInput = resolved.input?.filter(
@@ -446,17 +451,20 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
             })),
           ],
         } satisfies LlmModelReasoningInfo
-    const patch: LlmModelMetadataPatch = {
-      ...metadata.inputModalities === undefined && currentInput !== undefined
-        ? { inputModalities: currentInput } : {},
-      ...metadata.context === undefined && resolved.contextWindow !== undefined
-        ? { contextWindow: resolved.contextWindow } : {},
-      ...metadata.defaultMaxTokens === undefined && resolved.maxOutputTokens !== undefined
-        ? { maxTokens: resolved.maxOutputTokens } : {},
+    const patch = {
+      authoritative: true,
+      ...currentInput === undefined ? {} : { inputModalities: currentInput },
+      ...resolved.contextWindow === undefined ? {} : { contextWindow: resolved.contextWindow },
+      ...resolved.maxOutputTokens === undefined ? {} : { maxTokens: resolved.maxOutputTokens },
       ...currentReasoning !== undefined
         ? { reasoning: currentReasoning } : {},
-    }
-    return Object.keys(patch).length === 0 ? undefined : patch
+    } as LlmModelMetadataPatch & { authoritative: true }
+    return currentInput === undefined
+      && resolved.contextWindow === undefined
+      && resolved.maxOutputTokens === undefined
+      && currentReasoning === undefined
+      ? undefined
+      : patch
   })
   ctx.llm.registerModelReasoningResolver(async ({ model, ownedBy, baseURL, signal }) => {
     await catalog.refresh(signal)
@@ -476,14 +484,12 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
       })
       const patch = {
         id: model.id,
-        ...model.contextWindow === undefined && metadata.contextWindow !== undefined
-          ? { contextWindow: metadata.contextWindow } : {},
-        ...model.maxTokens === undefined && metadata.maxOutputTokens !== undefined
-          ? { maxTokens: metadata.maxOutputTokens } : {},
-        ...model.inputModalities === undefined && metadata.input !== undefined
-          ? { inputModalities: [...metadata.input] } : {},
+        authoritative: true,
+        ...metadata.contextWindow === undefined ? {} : { contextWindow: metadata.contextWindow },
+        ...metadata.maxOutputTokens === undefined ? {} : { maxTokens: metadata.maxOutputTokens },
+        ...metadata.input === undefined ? {} : { inputModalities: [...metadata.input] },
       }
-      return Object.keys(patch).length === 1 ? [] : [patch]
+      return Object.keys(patch).length === 2 ? [] : [patch]
     })
   })
   ctx.llm.registerModelInputResolver(async ({ provider, model, ownedBy, baseURL, signal }) => {

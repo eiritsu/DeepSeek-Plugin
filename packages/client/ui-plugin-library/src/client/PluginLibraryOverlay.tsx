@@ -92,7 +92,7 @@ export function PluginLibraryOverlay({ bridge, controller, t }: PluginLibraryOve
   const [thirdPartyCatalogTotal, setThirdPartyCatalogTotal] = useState(0)
   const [thirdPartyCategories, setThirdPartyCategories] = useState<readonly ThirdPartyCategory[]>([])
   const [thirdPartyCategory, setThirdPartyCategory] = useState('')
-  const [thirdPartySort, setThirdPartySort] = useState<ThirdPartySort>('stars')
+  const thirdPartySort: ThirdPartySort = 'stars'
   const [thirdPartySearchInput, setThirdPartySearchInput] = useState('')
   const [thirdPartySearch, setThirdPartySearch] = useState('')
   const [source, setSource] = useState('')
@@ -702,28 +702,6 @@ export function PluginLibraryOverlay({ bridge, controller, t }: PluginLibraryOve
                         >
                           {t('languageCode') === 'zh' ? category.chineseName : category.englishName}
                           {category.count > 0 ? <span>{category.count.toLocaleString()}</span> : null}
-                        </button>
-                      ))}
-                    </div>
-                    <div className={css.sortTabs} aria-label={t('thirdPartySort')}>
-                      {([
-                        ['stars', 'sortStars'],
-                        ['npmDownloads7d', 'sortNpm'],
-                        ['installs', 'sortInstalls'],
-                        ['newest', 'sortNewest'],
-                        ['active', 'sortActive'],
-                      ] as const).map(([id, key]) => (
-                        <button
-                          key={id}
-                          type="button"
-                          disabled={thirdPartyLoading}
-                          aria-pressed={thirdPartySort === id}
-                          onClick={() => {
-                            setThirdPartySort(id)
-                            void loadThirdPartyPage(1, thirdPartySearch, thirdPartyCategory, id, true)
-                          }}
-                        >
-                          {t(key)}
                         </button>
                       ))}
                     </div>

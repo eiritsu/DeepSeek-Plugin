@@ -177,7 +177,7 @@ describe('pi-ai model-discovery catalog', () => {
       },
     ])
     await expect(ctx.llm.discoverModels('llm-explicit', { provider: 'gateway' })).resolves.toEqual([
-      { id: 'gpt-5.6-luna', ownedBy: 'custom', maxTokens: 128_000, inputModalities: ['text'] },
+      { id: 'gpt-5.6-luna', ownedBy: 'custom', maxTokens: 128_000, inputModalities: ['text', 'image'] },
     ])
     await expect(ctx.llm.resolveModelInput('gateway', 'grok-4.6'))
       .resolves.toEqual(['text', 'image', 'audio', 'video', 'pdf'])

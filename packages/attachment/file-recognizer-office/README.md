@@ -18,6 +18,8 @@ This Bundle is independently packaged but is not portable to an unmodified DSH r
 
 The side-loaded package registers implementations on those extension points; it does not add them, monkey-patch the agent loop, or change the database and sandbox. A DSH build without these capabilities is incompatible and must be upgraded before installation. Once the capabilities are present, recognizer and Settings UI updates can be shipped independently through this Bundle.
 
+The recognizer declares priority `100`. Harness selects the highest priority recognizer first and breaks ties by id, so OCR/parser precedence stays stable when other file plugins are installed.
+
 ## Model Experience
 
 ### Recognized attachment text

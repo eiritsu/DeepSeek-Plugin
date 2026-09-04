@@ -607,37 +607,6 @@
   box-shadow: var(--dsw-shadow-lv1);
 }
 
-.sortTabs {
-  display: flex;
-  width: fit-content;
-  max-width: 100%;
-  overflow-x: auto;
-  border: 1px solid var(--dsw-alias-border-l2);
-  border-radius: 9px;
-  padding: 3px;
-  background: var(--dsw-alias-bg-layer-2);
-}
-
-.sortTabs button {
-  flex: none;
-  min-height: 30px;
-  border: 0;
-  border-radius: 6px;
-  padding: 0 11px;
-  background: transparent;
-  color: var(--dsw-alias-label-tertiary);
-  font: inherit;
-  font-size: 11px;
-  cursor: pointer;
-}
-
-.sortTabs button[aria-pressed='true'] {
-  background: var(--dsw-alias-bg-layer-3);
-  color: var(--dsw-alias-label-primary);
-  box-shadow: var(--dsw-shadow-lv1);
-}
-
-.sortTabs button:disabled,
 .catalogFilters button:disabled {
   cursor: default;
   opacity: .55;

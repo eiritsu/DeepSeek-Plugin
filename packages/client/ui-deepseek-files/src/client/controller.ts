@@ -85,19 +85,27 @@ export class DeepseekFilesSettingsController {
 
   /** Load credential presence without exposing values. */
   async loadCredentials(): Promise<void> {
-    const refs = Object.values(CREDENTIAL_REFS)
-    const response = await this.api.credentials.describe(refs)
-    if (!response.ok) return
-    const credentials = response.value
-    this.store.update((draft) => {
-      for (const kind of Object.keys(CREDENTIAL_REFS) as RecognitionKind[]) {
-        const credential = credentials[CREDENTIAL_REFS[kind]]
-        draft.credentials[kind] = {
-          configured: credential?.configured ?? false,
-          writable: credential?.writable ?? true,
-        }
+    try {
+      const refs = Object.values(CREDENTIAL_REFS)
+      const response = await this.api.credentials.describe(refs)
+      if (!response.ok) {
+        this.store.update((draft) => { draft.outcome = 'error' })
+        return
       }
-    })
+      const credentials = response.value
+      this.store.update((draft) => {
+        for (const kind of Object.keys(CREDENTIAL_REFS) as RecognitionKind[]) {
+          const credential = credentials[CREDENTIAL_REFS[kind]]
+          draft.credentials[kind] = {
+            configured: credential?.configured ?? false,
+            writable: credential?.writable ?? true,
+          }
+        }
+        delete draft.outcome
+      })
+    } catch (_readFailure) {
+      this.store.update((draft) => { draft.outcome = 'error' })
+    }
   }
 
   /**

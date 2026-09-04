@@ -165,11 +165,12 @@ async function recognizeChatFile(
   signal: AbortSignal | undefined,
 ): Promise<string | undefined> {
   if (!configured(config)) return undefined
-  const dataURL = `data:${file.mediaType};base64,${Buffer.from(file.data).toString('base64')}`
+  const mediaType = file.mediaType ?? 'application/octet-stream'
+  const dataURL = `data:${mediaType};base64,${Buffer.from(file.data).toString('base64')}`
   const filename = file.name ?? `attachment.${extension(file) ?? 'bin'}`
   const media = kind === 'video'
     ? { type: 'video_url', video_url: { url: dataURL } }
-    : file.mediaType.startsWith('image/')
+    : mediaType.startsWith('image/')
       ? { type: 'image_url', image_url: { url: dataURL } }
       : { type: 'file', file: { filename, file_data: dataURL } }
   const response = await fetch(operationEndpoint(config, 'chat/completions'), {
@@ -263,12 +264,14 @@ export function apply(ctx: Context, config: Config): void {
   const maxExtractedChars = config.maxExtractedChars ?? 200_000
   const maxUncompressedBytes = config.maxUncompressedBytes ?? 128 * 1024 * 1024
   const maxZipEntries = config.maxZipEntries ?? 4_000
-  const recognizer: FileRecognizer = {
+  const recognizer = {
     id: 'officeparser',
+    priority: 100,
     supports: (file) => {
       const suffix = extension(file)
       const settings = current()
-      return file.mediaType.startsWith('text/')
+      const mediaType = file.mediaType ?? ''
+      return mediaType.startsWith('text/')
         || (suffix !== undefined && (OFFICE_EXTENSIONS.has(suffix) || TEXT_EXTENSIONS.has(suffix)))
         || (configured(settings.ocr)
           && ((file.mediaType ?? '').startsWith('image/') || (suffix !== undefined && IMAGE_EXTENSIONS.has(suffix))))
@@ -281,23 +284,24 @@ export function apply(ctx: Context, config: Config): void {
       signal?.throwIfAborted()
       if (file.data.byteLength > maxInputBytes) return undefined
       const input: RecognizerFile = 'ref' in file ? { ...file.ref, data: file.data } : file
+      const mediaType = input.mediaType ?? ''
       const suffix = extension(input)
       const settings = current()
-      if (input.mediaType.startsWith('text/') || (suffix !== undefined && TEXT_EXTENSIONS.has(suffix))) {
+      if (mediaType.startsWith('text/') || (suffix !== undefined && TEXT_EXTENSIONS.has(suffix))) {
         const text = new TextDecoder('utf-8', { fatal: true }).decode(file.data)
         return text === '' ? undefined : { text: truncate(text, maxExtractedChars) }
       }
       try {
-        if (input.mediaType.startsWith('video/')
-          || (!input.mediaType.startsWith('audio/') && suffix !== undefined && VIDEO_EXTENSIONS.has(suffix))) {
+        if (mediaType.startsWith('video/')
+          || (!mediaType.startsWith('audio/') && suffix !== undefined && VIDEO_EXTENSIONS.has(suffix))) {
           const text = await recognizeChatFile(ctx, input, settings.videoUnderstanding ?? {}, 'video', signal)
           return text === undefined ? undefined : { text: truncate(text, maxExtractedChars) }
         }
-        if (input.mediaType.startsWith('audio/') || (suffix !== undefined && AUDIO_EXTENSIONS.has(suffix))) {
+        if (mediaType.startsWith('audio/') || (suffix !== undefined && AUDIO_EXTENSIONS.has(suffix))) {
           const text = await transcribeAudio(ctx, input, settings.audioTranscription ?? {}, signal)
           return text === undefined ? undefined : { text: truncate(text, maxExtractedChars) }
         }
-        if (input.mediaType.startsWith('image/') || (suffix !== undefined && IMAGE_EXTENSIONS.has(suffix))) {
+        if (mediaType.startsWith('image/') || (suffix !== undefined && IMAGE_EXTENSIONS.has(suffix))) {
           const text = await recognizeChatFile(ctx, input, settings.ocr ?? {}, 'ocr', signal)
           return text === undefined ? undefined : { text: truncate(text, maxExtractedChars) }
         }
@@ -317,6 +321,6 @@ export function apply(ctx: Context, config: Config): void {
         return undefined
       }
     },
-  }
+  } satisfies FileRecognizer & { priority: number }
   ctx.effect(() => ctx.attachments.registerFileRecognizer(recognizer), 'file-recognizer-office registration')
 }

@@ -55,8 +55,8 @@ export interface ThirdPartyCategory {
   readonly count: number
 }
 
-/** Sorts supported by the third-party catalog API. */
-export type ThirdPartySort = 'stars' | 'npmDownloads7d' | 'installs' | 'newest' | 'active'
+/** Sort supported by the third-party catalog API. */
+export type ThirdPartySort = 'stars'
 
 /** Review result retained natively until one installation consumes it. */
 export interface PluginReviewReport {
