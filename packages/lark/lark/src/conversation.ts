@@ -4,7 +4,7 @@ import { createHash } from 'node:crypto'
 import { Buffer } from 'node:buffer'
 import { extname } from 'node:path'
 import type { Context } from '@deepseek-ai/cordis'
-import type { Agent, AgentHandle } from '@deepseek-ai/dsh-agent'
+import type { Agent, AgentHandle, ModelSelection } from '@deepseek-ai/dsh-agent'
 import type {} from '@deepseek-ai/dsh-agent-default-model'
 import type {
   FileAttachmentRef,
@@ -49,6 +49,27 @@ interface PreparedResource {
   readonly descriptor: ResourceDescriptor
   readonly input: SaveImageAttachment | { data: Uint8Array; mediaType: string; name?: string }
   readonly kind: 'image' | 'file'
+}
+
+/** Supply the live default route when a Lark Agent was created before a model was configured. */
+function installDefaultModelRoute(
+  agentCtx: Context,
+  currentSelection: () => ModelSelection,
+): () => void {
+  return agentCtx.on('agent/request', async (_payload, next) => {
+    const resolved = await next()
+    if (resolved.provider.length > 0 && resolved.model.length > 0) return resolved
+    const selection = currentSelection()
+    if (selection.provider.length === 0 || selection.model.length === 0) return resolved
+    return {
+      ...resolved,
+      provider: selection.provider,
+      model: selection.model,
+      ...resolved.reasoningEffort === undefined && selection.reasoningEffort !== undefined
+        ? { reasoningEffort: selection.reasoningEffort }
+        : {},
+    }
+  })
 }
 
 /** Construction options for one application-scoped Lark conversation bridge. */
@@ -103,6 +124,7 @@ export class LarkConversationBridge {
   private readonly creations = new Map<SessionId, Promise<Agent>>()
   private readonly handles = new Map<SessionId, AgentHandle>()
   private readonly liveTimeContexts = new Map<SessionId, { dispose(): Promise<void> }>()
+  private readonly activeMessages = new Map<SessionId, number>()
   private readonly inFlight = new Set<Promise<void>>()
   private unsubscribers: Array<() => void> = []
   private connected = false
@@ -168,8 +190,11 @@ export class LarkConversationBridge {
 
   private async handleMessage(message: NormalizedMessage): Promise<void> {
     if (message.chatType !== 'p2p' || message.senderId !== this.options.allowedSenderId) return
+    let sessionId: SessionId | undefined
     try {
       const agent = await this.ensureAgent(message.chatId)
+      sessionId = agent.session.id
+      this.activeMessages.set(sessionId, (this.activeMessages.get(sessionId) ?? 0) + 1)
       if (this.wasAccepted(agent, message.messageId)) return
       const content = await this.inboundContent(message)
       if (content.length === 0) {
@@ -204,6 +229,8 @@ export class LarkConversationBridge {
       } catch (replyError: unknown) {
         this.ctx.logger.warn(`Lark error reply for ${message.messageId} failed: ${String(replyError)}`)
       }
+    } finally {
+      if (sessionId !== undefined) await this.releaseIdleAgent(sessionId)
     }
   }
 
@@ -378,6 +405,7 @@ export class LarkConversationBridge {
       .some(header => header.id === sessionId)
     const selection = this.ctx.agentDefaultModel.currentSelection()
     const setup = async (agentCtx: Context): Promise<void> => {
+      installDefaultModelRoute(agentCtx, () => this.ctx.agentDefaultModel.currentSelection())
       await agentCtx.plugin(timeContext, { timeZone: this.options.timeZone })
     }
     const handle = stored
@@ -408,15 +436,36 @@ export class LarkConversationBridge {
   /** Add Lark-owned context and Workspace membership to an Agent resumed by another client. */
   private async configureLiveAgent(sessionId: SessionId, agent: Agent): Promise<Agent> {
     const workspace = await this.resolveWorkspace(agent.session.header.cwd ?? this.options.cwd)
+    const routeDisposer = installDefaultModelRoute(agent.ctx, () => this.ctx.agentDefaultModel.currentSelection())
     const fiber = await agent.ctx.plugin(timeContext, { timeZone: this.options.timeZone })
     try {
       await workspace.attachSession(sessionId)
     } catch (error) {
+      routeDisposer()
       await fiber.dispose()
       throw error
     }
-    this.liveTimeContexts.set(sessionId, fiber)
+    this.liveTimeContexts.set(sessionId, {
+      dispose: async () => {
+        routeDisposer()
+        await fiber.dispose()
+      },
+    })
     return agent
+  }
+
+  /** Release a Lark-owned Agent after its last in-flight message settles. */
+  private async releaseIdleAgent(sessionId: SessionId): Promise<void> {
+    const remaining = (this.activeMessages.get(sessionId) ?? 1) - 1
+    if (remaining > 0) {
+      this.activeMessages.set(sessionId, remaining)
+      return
+    }
+    this.activeMessages.delete(sessionId)
+    const handle = this.handles.get(sessionId)
+    if (handle === undefined) return
+    this.handles.delete(sessionId)
+    await handle.dispose()
   }
 
   /** Configure a live session whose durable Lark provenance belongs to this application. */

@@ -21,6 +21,10 @@ interface FakeSession {
 }
 
 type SessionListener = (session: FakeSession, event: FakeEvent) => void
+type RequestListener = (
+  payload: unknown,
+  next: () => Promise<{ provider: string; model: string; reasoningEffort?: string }>,
+) => Promise<{ provider: string; model: string; reasoningEffort?: string }>
 
 const IMAGE_REF: ImageAttachmentRef = {
   attachmentId: AttachmentId('image-attachment'),
@@ -95,11 +99,14 @@ function harness(options: {
   readonly disposed: ReturnType<typeof vi.fn>
   readonly scopedDisposed: ReturnType<typeof vi.fn>
   readonly savedImages: ReturnType<typeof vi.fn>
+  readonly requestListeners: RequestListener[]
 } {
   const listeners = new Set<SessionListener>()
   const agentCreatedListeners = new Set<(payload: { agent: Agent }) => void>()
   const sessions = new Map<SessionId, FakeSession>()
   const agents = new Map<SessionId, Agent>()
+  const persistedIds = new Set<SessionId>()
+  const persistedEvents = new Map<SessionId, FakeEvent[]>()
   const followups: UserMessage[] = []
   const created: SessionId[] = []
   const createdCwds: Array<string | undefined> = []
@@ -111,10 +118,15 @@ function harness(options: {
   const disposed = vi.fn(async () => {})
   const scopedDisposed = vi.fn(async () => {})
   const savedImages = vi.fn(async () => [IMAGE_REF])
+  const requestListeners: RequestListener[] = []
   const agentCtx = {
     plugin: vi.fn(async (_plugin: unknown, config: { timeZone: string }) => {
       setupTimeZones.push(config.timeZone)
       return { dispose: scopedDisposed }
+    }),
+    on: vi.fn((name: string, listener: unknown) => {
+      if (name === 'agent/request') requestListeners.push(listener as RequestListener)
+      return () => {}
     }),
   } as unknown as Context
   const workspace = {
@@ -128,8 +140,12 @@ function harness(options: {
     session.events.push(event)
     for (const listener of listeners) listener(session, event)
   }
-  const makeHandle = (sessionId: SessionId, cwd = options.sessionCwd ?? '/workspace'): AgentHandle => {
-    const session: FakeSession = { id: sessionId, header: { cwd }, events: [] }
+  const makeHandle = (
+    sessionId: SessionId,
+    cwd = options.sessionCwd ?? '/workspace',
+    initialEvents: FakeEvent[] = [],
+  ): AgentHandle => {
+    const session: FakeSession = { id: sessionId, header: { cwd }, events: [...initialEvents] }
     const agent = {
       id: sessionId,
       ctx: agentCtx,
@@ -161,6 +177,7 @@ function harness(options: {
       agent,
       dispose: async () => {
         await disposed()
+        persistedEvents.set(sessionId, [...session.events])
         agents.delete(sessionId)
         sessions.delete(sessionId)
       },
@@ -209,6 +226,7 @@ function harness(options: {
         setup?: (ctx: Context) => void | Promise<void>
       }) => {
         created.push(sessionId)
+        persistedIds.add(sessionId)
         createdCwds.push(meta?.cwd)
         await setup?.(agentCtx)
         return makeHandle(sessionId, meta?.cwd)
@@ -218,13 +236,14 @@ function harness(options: {
         setup?: (ctx: Context) => void | Promise<void>
       }) => {
         resumed.push(resumeSessionId)
+        persistedIds.add(resumeSessionId)
         await setup?.(agentCtx)
-        return makeHandle(resumeSessionId)
+        return makeHandle(resumeSessionId, undefined, persistedEvents.get(resumeSessionId))
       }),
     },
     agentDefaultModel: { currentSelection: () => ({ provider: 'test', model: 'test-model' }) },
     sessionPersistence: {
-      list: vi.fn(async () => options.persisted === true
+      list: vi.fn(async () => options.persisted === true || persistedIds.has(larkSessionId('cli_app', 'oc_chat'))
         ? [{ id: larkSessionId('cli_app', 'oc_chat') }]
         : []),
     },
@@ -258,6 +277,7 @@ function harness(options: {
     disposed,
     scopedDisposed,
     savedImages,
+    requestListeners,
   }
 }
 
@@ -286,8 +306,11 @@ describe('LarkConversationBridge', () => {
 
     expect(runtime.created).toEqual([larkSessionId('cli_app', 'oc_chat')])
     expect(runtime.createdCwds).toEqual(['/workspace'])
-    expect(runtime.setupTimeZones).toEqual(['Asia/Shanghai'])
-    expect(runtime.attached).toEqual([larkSessionId('cli_app', 'oc_chat')])
+    expect(runtime.setupTimeZones).toEqual(['Asia/Shanghai', 'Asia/Shanghai'])
+    expect(runtime.attached).toEqual([
+      larkSessionId('cli_app', 'oc_chat'),
+      larkSessionId('cli_app', 'oc_chat'),
+    ])
     expect(runtime.followups).toHaveLength(1)
     expect(runtime.followups[0]?.source).toEqual({
       kind: 'lark',
@@ -299,7 +322,7 @@ describe('LarkConversationBridge', () => {
     expect(channel.replies).toEqual([{ text: '收到' }])
     await bridge.dispose()
     expect(channel.disconnect).toHaveBeenCalledOnce()
-    expect(runtime.disposed).toHaveBeenCalledOnce()
+    expect(runtime.disposed).toHaveBeenCalledTimes(2)
   })
 
   it('stores inbound images, recognizes transient files, and returns supported response blocks', async () => {
@@ -332,6 +355,28 @@ describe('LarkConversationBridge', () => {
       { text: '已完成' },
       { image: { source: Buffer.from([1, 2, 3]) } },
     ])
+    await bridge.dispose()
+  })
+
+  it('supplies the current default route to a model-less Lark Agent', async () => {
+    const runtime = harness()
+    const channel = new FakeChannel()
+    const bridge = new LarkConversationBridge(runtime.ctx, channel as unknown as LarkChannel, {
+      appId: 'cli_app',
+      allowedSenderId: 'ou_allowed',
+      responseTimeoutMs: 1_000,
+      cwd: '/workspace',
+      timeZone: 'Asia/Shanghai',
+    })
+    await bridge.connect()
+    await channel.emitMessage(inbound())
+
+    const listener = runtime.requestListeners[0]
+    expect(listener).toBeDefined()
+    await expect(listener?.({}, async () => ({ provider: '', model: '' }))).resolves.toMatchObject({
+      provider: 'test',
+      model: 'test-model',
+    })
     await bridge.dispose()
   })
 

@@ -8,10 +8,10 @@
 
 权限页通过官方 Open Platform 应用信息接口分别核验 tenant 与 user scope；批量导入模板包含该检查所需的最小应用身份权限 `application:application:self_manage`，不申请可读取企业全部应用信息的高级权限 `admin:app.info:readonly`。任一层未开通时都不会显示“已获取”。复制按钮只把批量导入模板写入剪贴板，不在页面或 Remote 日志中渲染 JSON。用户 OAuth 仅请求同一模板中的 user scope，使应用后台权限与个人授权保持对应。
 
-私聊 Channel 只接受完成用户授权时记录的 Open ID，群聊和其他发送者不会进入 Agent。每个 `(App ID, chat ID)` 映射到一个稳定的 DSH session；收到的消息以 `kind: lark` 及 app、chat、message、sender 标识写入持久日志，平台重投同一 message ID 时不会再次提交。新会话按 `conversationCwd` 创建或复用可重命名的 DSH Workspace；恢复或已由其他客户端恢复的私聊 session 按其持久化 cwd 重新加入原 Workspace，因此默认目录变更不会破坏已有聊天。新会话使用当前默认模型，已有会话从 session persistence 恢复。
+私聊 Channel 只接受完成用户授权时记录的 Open ID，群聊和其他发送者不会进入 Agent。每个 `(App ID, chat ID)` 映射到一个稳定的 DSH session；收到的消息以 `kind: lark` 及 app、chat、message、sender 标识写入持久日志，平台重投同一 message ID 时不会再次提交。新会话按 `conversationCwd` 创建或复用可重命名的 DSH Workspace；恢复或已由其他客户端恢复的私聊 session 按其持久化 cwd 重新加入原 Workspace，因此默认目录变更不会破坏已有聊天。新会话使用当前默认模型，已有会话从 session persistence 恢复；如果旧 Agent 在默认模型尚未配置时创建，首次请求会从当前默认模型补齐 provider/model。
 
 入站文本直接进入用户消息；图片和文件由 Channel 下载后保存到 DSH attachment store，并附带可用的识别文本。assistant 回复中的文本通过 Channel 的 text 消息发送，图片 attachment 和文件 attachment 会依次回复到原飞书消息。文件能力以结构化 attachment block 为准，不会把回复文本中的本地路径当作待上传文件。
 
-对话连接默认启用，可通过 `conversationEnabled` 关闭。`conversationUserOpenId`、`conversationHandshakeTimeoutMs`、`conversationResponseTimeoutMs`、`conversationCwd` 和 `conversationTimeZone` 可在 Cordis 配置中覆盖；`conversationCwd` 为空时，新私聊会话使用 DSH 运行目录。每个 Lark Agent 都挂载 DSH `time-context`，在飞书消息不含浏览器时区时使用 `conversationTimeZone`（默认 `Asia/Shanghai`）提供当前时间。管理页连接流程会自动维护允许的用户 Open ID。插件卸载或重载会先停止入站、等待在途消息处理结束，再断开 Channel 并释放其创建或恢复的 Agent。
+对话连接默认启用，可通过 `conversationEnabled` 关闭。`conversationUserOpenId`、`conversationHandshakeTimeoutMs`、`conversationResponseTimeoutMs`、`conversationCwd` 和 `conversationTimeZone` 可在 Cordis 配置中覆盖；`conversationCwd` 为空时，新私聊会话使用 DSH 运行目录。每个 Lark Agent 都挂载 DSH `time-context`，在飞书消息不含浏览器时区时使用 `conversationTimeZone`（默认 `Asia/Shanghai`）提供当前时间。管理页连接流程会自动维护允许的用户 Open ID。每条消息完成或失败后，插件释放自己创建的空闲 Agent；下一条消息按持久化 session 恢复，因此不会长期占用会话，也不会阻止桌面端删除已完成的会话。插件卸载或重载会先停止入站、等待在途消息处理结束，再断开 Channel 并释放其创建或恢复的 Agent。
 
 安装本包会通过 `cordis.patch.yml` 加入一个同时提供 Host 与浏览器 face 的 Lark 条目；Lark 管理页面由该 package root 的 `dsh.client` 声明进入 Web 模块表，不会修改 DeepSeek Harness 源码或数据库格式。
