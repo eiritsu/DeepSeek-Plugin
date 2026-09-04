@@ -4,10 +4,11 @@ import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'reac
 import { IconCloseOutline16, IconSearchOutline16, IconSkillOutline16 } from '@deepseek-ai/dsh-client-ui-primitives'
 import type { InjectFace, PropsLocale, PropsRuntime } from '@deepseek-ai/dsh-client-ui-slots'
 import { fetchSkillPackages, fetchSkills, packageUrl, skillUrl, type SkillHubPackage, type SkillHubSkill } from './api.ts'
+import type { SkillHubBridge } from './bridge.ts'
 import type { SkillLibraryController } from './controller.ts'
 import css from './SkillLibraryOverlay.module.css'
 
-export interface SkillLibraryOverlayInjected { readonly controller: SkillLibraryController }
+export interface SkillLibraryOverlayInjected { readonly controller: SkillLibraryController; readonly bridge: SkillHubBridge }
 export type SkillLibraryOverlayProps = PropsRuntime<'shell.overlay'> & PropsLocale<'skillLibrary'> & InjectFace<SkillLibraryOverlayInjected>
 type Tab = 'installed' | 'review' | 'discovery' | 'logs'
 type MarketTab = 'skills' | 'packages'
@@ -16,7 +17,7 @@ type SkillSort = 'score' | 'trending' | 'downloads' | 'newest'
 function message(error: unknown): string { return error instanceof Error ? error.message : String(error) }
 
 /** Render paged SkillHub data with an internal scroll viewport and prefetch. */
-export function SkillLibraryOverlay({ controller, t }: SkillLibraryOverlayProps) {
+export function SkillLibraryOverlay({ controller, bridge, t }: SkillLibraryOverlayProps) {
   const open = useSyncExternalStore(controller.subscribe, controller.getSnapshot)
   const [tab, setTab] = useState<Tab>('installed')
   const [marketTab, setMarketTab] = useState<MarketTab>('skills')
@@ -79,14 +80,16 @@ export function SkillLibraryOverlay({ controller, t }: SkillLibraryOverlayProps)
     if (element.scrollHeight - element.scrollTop - element.clientHeight < 180 && hasMore && !loadingRef.current) void load(page + 1, false)
   }
 
-  const download = (skill: SkillHubSkill): void => {
+  const download = async (skill: SkillHubSkill): Promise<void> => {
     setDownloading(skill.slug)
-    const anchor = document.createElement('a')
-    anchor.href = `https://api.skillhub.cn/api/v1/download?slug=${encodeURIComponent(skill.slug)}`
-    anchor.download = `${skill.slug}.zip`
-    anchor.rel = 'noreferrer'
-    anchor.click()
-    window.setTimeout(() => { setDownloading(undefined) }, 800)
+    setError(undefined)
+    try {
+      await bridge.request({ action: 'downloadSkill', slug: skill.slug })
+    } catch (reason) {
+      setError(message(reason))
+    } finally {
+      setDownloading(undefined)
+    }
   }
 
   if (!open) return null

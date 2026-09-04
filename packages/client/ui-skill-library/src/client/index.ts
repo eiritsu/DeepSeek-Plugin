@@ -7,6 +7,7 @@ import type {} from '@deepseek-ai/dsh-client-ui-sidebar/client'
 import { SkillLibraryController } from './controller.ts'
 import { SkillLibraryOverlay, type SkillLibraryOverlayInjected } from './SkillLibraryOverlay.tsx'
 import { SkillLibraryTrigger, type SkillLibraryTriggerInjected } from './SkillLibraryTrigger.tsx'
+import type { SkillHubBridge } from './bridge.ts'
 import { en, zh, type SkillLibraryLocaleKey } from './locales.ts'
 
 declare global {
@@ -31,5 +32,6 @@ export function apply(ctx: ClientContext): void {
   ctx.effect(() => ctx.locale.register(NS, { zh, en }), 'ui-skill-library: dictionaries')
   const controller = new SkillLibraryController()
   ctx.slots.inject('sidebar.footer.action', () => ctx.slots.register({ name: 'sidebar.footer.action', id: 'skill-library', order: 80, locale: NS, inject: (): SkillLibraryTriggerInjected => ({ controller }) }, SkillLibraryTrigger))
-  ctx.slots.inject('shell.overlay', () => ctx.slots.register({ name: 'shell.overlay', id: 'skill-library', order: 80, locale: NS, inject: (): SkillLibraryOverlayInjected => ({ controller }) }, SkillLibraryOverlay))
+  const bridge = window.dshDesktopPluginBridge as SkillHubBridge
+  ctx.slots.inject('shell.overlay', () => ctx.slots.register({ name: 'shell.overlay', id: 'skill-library', order: 80, locale: NS, inject: (): SkillLibraryOverlayInjected => ({ controller, bridge }) }, SkillLibraryOverlay))
 }
