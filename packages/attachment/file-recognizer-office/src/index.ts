@@ -191,8 +191,10 @@ async function recognizeChatFile(
     }),
     ...(signal === undefined ? {} : { signal }),
   })
-  if (!response.ok) return undefined
-  return responseText(await response.json())
+  if (!response.ok) throw new Error(`Deepseek-Files ${kind} service returned HTTP ${response.status} for model ${config.model}. Check the configured endpoint, model and API key.`)
+  const text = responseText(await response.json())
+  if (text === undefined) throw new Error(`Deepseek-Files ${kind} service returned no recognized text for model ${config.model}.`)
+  return text
 }
 
 async function transcribeAudio(
@@ -211,8 +213,10 @@ async function transcribeAudio(
     body: form,
     ...(signal === undefined ? {} : { signal }),
   })
-  if (!response.ok) return undefined
-  return responseText(await response.json())
+  if (!response.ok) throw new Error(`Deepseek-Files audio service returned HTTP ${response.status} for model ${config.model}. Check the configured endpoint, model and API key.`)
+  const text = responseText(await response.json())
+  if (text === undefined) throw new Error(`Deepseek-Files audio service returned no transcript for model ${config.model}.`)
+  return text
 }
 
 async function preflightZip(data: Uint8Array, maxEntries: number, maxBytes: number): Promise<boolean> {
@@ -316,8 +320,10 @@ export function apply(ctx: Context, config: Config): void {
         }
         signal?.throwIfAborted()
         return text === '' ? undefined : { text: truncate(text, maxExtractedChars) }
-      } catch {
+      } catch (error) {
         signal?.throwIfAborted()
+        if (mediaType.startsWith('image/') || mediaType.startsWith('audio/') || mediaType.startsWith('video/')
+          || (suffix !== undefined && (IMAGE_EXTENSIONS.has(suffix) || AUDIO_EXTENSIONS.has(suffix) || VIDEO_EXTENSIONS.has(suffix) || suffix === 'pdf'))) throw error
         return undefined
       }
     },
