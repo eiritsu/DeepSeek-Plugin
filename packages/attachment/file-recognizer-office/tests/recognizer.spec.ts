@@ -122,6 +122,16 @@ describe('file-recognizer-office', () => {
     expect(result?.text).toBe('# Harness\n\nMarkdown content.')
   })
 
+  it('handles attachments whose transport omitted the media type', async () => {
+    const recognizer = registered()
+    const attachment = { ...ref('README.md'), mediaType: undefined } as never
+    expect(recognizer.supports(attachment)).toBe(true)
+    await expect(recognizer.recognize({
+      ref: attachment,
+      data: new TextEncoder().encode('# Harness'),
+    })).resolves.toEqual({ text: '# Harness' })
+  })
+
   it('recognizes JSON documents by filename when the browser reports application/json', async () => {
     const recognizer = registered()
     const attachment = ref('settings.json', 'application/json')
