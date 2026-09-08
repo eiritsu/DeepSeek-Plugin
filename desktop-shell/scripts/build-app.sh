@@ -65,10 +65,14 @@ if [ "$DISTRIBUTION" = true ]; then
   copy_tracked_files "$SOURCE_ROOT" "$SNAPSHOT_ROOT" .
   rm -rf \
     "$SNAPSHOT_ROOT/packages/client/ui-plugin-library" \
+    "$SNAPSHOT_ROOT/packages/client/ui-lark" \
+    "$SNAPSHOT_ROOT/packages/lark" \
     "$SNAPSHOT_ROOT/desktop-shell"
   copy_tracked_files "$PLUGIN_ROOT" "$SNAPSHOT_ROOT" \
     packages/client/ui-plugin-library \
     packages/client/ui-skill-library \
+    packages/client/ui-lark \
+    packages/lark \
     desktop-shell
   copy_tracked_files "$SOURCE_ROOT" "$SNAPSHOT_ROOT" \
     packages/client/ui-plugin-library/package.json \
