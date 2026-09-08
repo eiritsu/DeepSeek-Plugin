@@ -15,14 +15,14 @@ import type {
 import { UNKNOWN_FILE_MEDIA_TYPE } from '@deepseek-ai/dsh-attachment'
 import { createUserMessage } from '@deepseek-ai/dsh-llm'
 import type { AssistantMessage, ContentBlock } from '@deepseek-ai/dsh-llm'
-import type {} from '@deepseek-ai/dsh-llm/message'
+import type {} from '@deepseek-ai/dsh-llm'
 import { SessionId } from '@deepseek-ai/dsh-session'
 import type {} from '@deepseek-ai/dsh-session-persistence'
 import * as timeContext from '@deepseek-ai/dsh-time-context'
 import type { Workspace } from '@deepseek-ai/dsh-workspace'
 import type { LarkChannel, NormalizedMessage, ResourceDescriptor } from '@larksuite/channel'
 
-declare module '@deepseek-ai/dsh-llm/message' {
+declare module '@deepseek-ai/dsh-llm' {
   interface MessageSourceMap {
     /** Human input received from one Lark application and chat. */
     lark: {
