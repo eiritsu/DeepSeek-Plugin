@@ -1,7 +1,7 @@
 /** Reactive state and Remote actions for the Lark management page. */
 
 import type { ClientRemote } from '@deepseek-ai/dsh-api-remotes/client'
-import { createSnapshotStore, type SnapshotStore } from '@deepseek-ai/dsh-client-runtime/client'
+import { createSnapshotStore, type SnapshotStore } from '@deepseek-ai/dsh-client-store'
 import type { LarkManagementStatus } from '@deepseek-ai/dsh-lark'
 import { openVerificationUrl } from './external-link.ts'
 

@@ -1,7 +1,8 @@
 /** Settings and credential state for the Deepseek-Files section. */
 
 import type { ClientRemote } from '@deepseek-ai/dsh-api-remotes/client'
-import { createSnapshotStore, type SettingsScope, type SnapshotStore } from '@deepseek-ai/dsh-client-runtime/client'
+import { createSnapshotStore, type SnapshotStore } from '@deepseek-ai/dsh-client-store'
+import type { SettingsScope } from '@deepseek-ai/dsh-client-ui-settings/client'
 
 /** Recognition provider identities shown by the Settings page. */
 export type RecognitionKind = 'ocr' | 'audioTranscription' | 'videoUnderstanding'
